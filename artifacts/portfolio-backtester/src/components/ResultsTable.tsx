@@ -21,6 +21,8 @@ const METRICS: MetricCard[] = [
   { icon: BarChart2, label: "연평균 수익률 (CAGR)", key: "cagr", format: (v) => formatPercent(v), higherIsBetter: true },
   { icon: AlertTriangle, label: "최대 낙폭 (MDD)", key: "maxDrawdown", format: (v) => `-${Math.abs(v).toFixed(2)}%`, higherIsBetter: false },
   { icon: BarChart2, label: "샤프 비율", key: "sharpeRatio", format: (v) => v.toFixed(3), higherIsBetter: true },
+  { icon: BarChart2, label: "연간 변동성", key: "volatility", format: (v) => `${v.toFixed(2)}%`, higherIsBetter: false },
+  { icon: TrendingUp, label: "월간 상승 비율", key: "winRate", format: (v) => `${v.toFixed(1)}%`, higherIsBetter: true },
   { icon: Gift, label: "총 배당금", key: "totalDividends", format: (v) => formatCurrency(v, true), higherIsBetter: true },
 ];
 

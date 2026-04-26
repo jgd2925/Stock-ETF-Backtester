@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { PortfolioBuilder } from "@/components/PortfolioBuilder";
 import { BacktestSettings } from "@/components/BacktestSettings";
 import { ResultsChart } from "@/components/ResultsChart";
@@ -8,7 +8,7 @@ import { fetchHistoricalData } from "@/lib/api";
 import { runBacktest } from "@/lib/backtest";
 import type { BacktestOptions, BacktestResult } from "@/lib/backtest";
 import { cn } from "@/lib/utils";
-import { Play, Loader2, BarChart3, AlertCircle, Sun, Moon, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, Loader2, BarChart3, AlertCircle, Sun, Moon, ChevronDown, ChevronUp, Download } from "lucide-react";
 
 const PORTFOLIO_COLORS = [
   "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7",
@@ -20,6 +20,8 @@ interface Portfolio {
   color: string;
   holdings: Array<{ symbol: string; name: string; weight: number }>;
 }
+
+const STORAGE_KEY = "portfolio-backtester-state";
 
 function defaultPortfolios(): Portfolio[] {
   return [
@@ -48,6 +50,56 @@ function defaultOptions(): BacktestOptions {
   };
 }
 
+function loadFromStorage(): { portfolios: Portfolio[]; options: BacktestOptions } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const opts = parsed.options;
+    return {
+      portfolios: parsed.portfolios ?? defaultPortfolios(),
+      options: {
+        ...defaultOptions(),
+        ...opts,
+        startDate: new Date(opts.startDate),
+        endDate: new Date(opts.endDate),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+function exportCsv(results: BacktestResult[]) {
+  if (results.length === 0) return;
+  const header = ["날짜", ...results.flatMap((r) => [`${r.label} 자산`, `${r.label} 투자금`, `${r.label} 수익률(%)`])];
+  const allDates = new Set<number>();
+  results.forEach((r) => r.series.forEach((p) => allDates.add(p.date)));
+  const sortedDates = [...allDates].sort((a, b) => a - b);
+  const rows = sortedDates.map((date) => {
+    const d = new Date(date).toISOString().slice(0, 10);
+    const cols: (string | number)[] = [d];
+    results.forEach((r) => {
+      const point = r.series.find((p) => p.date === date);
+      if (point) {
+        const ret = point.invested > 0 ? ((point.value - point.invested) / point.invested) * 100 : 0;
+        cols.push(Math.round(point.value), Math.round(point.invested), ret.toFixed(2));
+      } else {
+        cols.push("", "", "");
+      }
+    });
+    return cols;
+  });
+  const csv = [header, ...rows].map((r) => r.join(",")).join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `backtest_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function Home() {
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== "undefined") {
@@ -55,9 +107,17 @@ export default function Home() {
     }
     return false;
   });
-  const [portfolios, setPortfolios] = useState<Portfolio[]>(defaultPortfolios);
-  const [options, setOptions] = useState<BacktestOptions>(defaultOptions);
+
+  const [portfolios, setPortfolios] = useState<Portfolio[]>(() => loadFromStorage()?.portfolios ?? defaultPortfolios());
+  const [options, setOptions] = useState<BacktestOptions>(() => loadFromStorage()?.options ?? defaultOptions());
   const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ portfolios, options }));
+    } catch {}
+  }, [portfolios, options]);
+
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeResultTab, setActiveResultTab] = useState<"chart" | "metrics" | "annual">("chart");
@@ -292,6 +352,17 @@ export default function Home() {
                         {tab === "chart" ? "차트" : tab === "metrics" ? "성과 지표" : "연도별 수익률"}
                       </button>
                     ))}
+                    <div className="ml-auto">
+                      <button
+                        data-testid="button-export-csv"
+                        onClick={() => exportCsv(results)}
+                        className="flex items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-all"
+                        title="CSV로 내보내기"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        CSV
+                      </button>
+                    </div>
                   </div>
                   <div className="p-5">
                     {activeResultTab === "chart" && <ResultsChart results={results} />}

@@ -33,6 +33,8 @@ export interface BacktestResult {
   cagr: number;
   maxDrawdown: number;
   sharpeRatio: number;
+  volatility: number;
+  winRate: number;
   totalDividends: number;
   totalContributions: number;
   finalValue: number;
@@ -231,6 +233,9 @@ export function runBacktest(
   const stdDev = Math.sqrt(variance);
   const riskFreeMonthly = 0.04 / 12;
   const sharpeRatio = stdDev > 0 ? ((avgReturn - riskFreeMonthly) / stdDev) * Math.sqrt(12) : 0;
+  const volatility = stdDev * Math.sqrt(12) * 100;
+  const positiveMonths = returns.filter((r) => r > 0).length;
+  const winRate = returns.length > 0 ? (positiveMonths / returns.length) * 100 : 0;
 
   return {
     portfolioId,
@@ -241,6 +246,8 @@ export function runBacktest(
     cagr,
     maxDrawdown,
     sharpeRatio,
+    volatility,
+    winRate,
     totalDividends,
     totalContributions,
     finalValue,
@@ -257,6 +264,8 @@ function emptyResult(portfolioId: string, label: string, color: string): Backtes
     cagr: 0,
     maxDrawdown: 0,
     sharpeRatio: 0,
+    volatility: 0,
+    winRate: 0,
     totalDividends: 0,
     totalContributions: 0,
     finalValue: 0,

@@ -22,6 +22,18 @@ const COLORS = [
   "#06B6D4", "#F97316", "#10B981", "#8B5CF6", "#EC4899",
 ];
 
+const POPULAR_TICKERS = [
+  { symbol: "SPY", name: "S&P 500" },
+  { symbol: "QQQ", name: "나스닥 100" },
+  { symbol: "VTI", name: "미국 전체주식" },
+  { symbol: "IEF", name: "미국 중기채권" },
+  { symbol: "GLD", name: "금 ETF" },
+  { symbol: "SCHD", name: "배당주 ETF" },
+  { symbol: "005930.KS", name: "삼성전자" },
+  { symbol: "069500.KS", name: "KODEX 200" },
+  { symbol: "360750.KS", name: "TIGER 미국S&P500" },
+];
+
 export function PortfolioBuilder({ portfolios, onChange }: Props) {
   const [activeTab, setActiveTab] = useState(portfolios[0]?.id ?? "");
 
@@ -176,6 +188,40 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
             onSelect={(r) => addHolding(activePortfolio.id, r)}
             placeholder="종목 검색하여 추가 (예: 005930.KS, SPY, QQQ...)"
           />
+
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide px-0.5">인기 종목 빠른 추가</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {POPULAR_TICKERS.map((t) => {
+                const alreadyAdded = activePortfolio.holdings.some((h) => h.symbol === t.symbol);
+                return (
+                  <button
+                    key={t.symbol}
+                    data-testid={`button-quick-add-${t.symbol}`}
+                    disabled={alreadyAdded}
+                    onClick={() =>
+                      addHolding(activePortfolio.id, {
+                        symbol: t.symbol,
+                        shortName: t.name,
+                        longName: t.name,
+                        exchange: "",
+                        quoteType: "ETF",
+                      })
+                    }
+                    className={cn(
+                      "flex flex-col items-start px-2 py-1.5 rounded-md border text-left transition-all",
+                      alreadyAdded
+                        ? "border-border bg-muted opacity-50 cursor-not-allowed"
+                        : "border-border bg-card hover:border-primary/50 hover:bg-primary/5 cursor-pointer"
+                    )}
+                  >
+                    <span className="font-mono text-[10px] font-bold text-primary leading-tight">{t.symbol}</span>
+                    <span className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate w-full">{t.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {activePortfolio.holdings.length > 0 ? (
             <div className="flex flex-col gap-2">
