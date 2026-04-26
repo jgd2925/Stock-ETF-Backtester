@@ -1,9 +1,4 @@
-const YAHOO_PROXY = "https://query1.finance.yahoo.com";
-const CORS_PROXY = "https://corsproxy.io/?";
-
-function proxyUrl(url: string): string {
-  return `${CORS_PROXY}${encodeURIComponent(url)}`;
-}
+const API_BASE = "/api";
 
 export interface SearchResult {
   symbol: string;
@@ -32,9 +27,8 @@ export interface DividendData {
 
 export async function searchSymbol(query: string): Promise<SearchResult[]> {
   if (!query || query.length < 1) return [];
-  const url = `${YAHOO_PROXY}/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=20&newsCount=0&enableFuzzyQuery=false&region=KR,US`;
   try {
-    const res = await fetch(proxyUrl(url), {
+    const res = await fetch(`${API_BASE}/finance/search?q=${encodeURIComponent(query)}`, {
       headers: { Accept: "application/json" },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -62,11 +56,11 @@ export async function fetchHistoricalData(
 ): Promise<{ prices: HistoricalData[]; dividends: DividendData[] }> {
   const period1 = Math.floor(startDate.getTime() / 1000);
   const period2 = Math.floor(endDate.getTime() / 1000);
-  const url = `${YAHOO_PROXY}/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1mo&events=div,split&includeAdjustedClose=true`;
 
-  const res = await fetch(proxyUrl(url), {
-    headers: { Accept: "application/json" },
-  });
+  const res = await fetch(
+    `${API_BASE}/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1mo&events=div%2Csplit`,
+    { headers: { Accept: "application/json" } }
+  );
   if (!res.ok) throw new Error(`${symbol} 데이터를 불러오지 못했습니다 (HTTP ${res.status})`);
   const json = await res.json();
 
@@ -99,8 +93,12 @@ export async function fetchHistoricalData(
 
 export async function fetchQuote(symbol: string): Promise<{ price: number; currency: string; name: string } | null> {
   try {
-    const url = `${YAHOO_PROXY}/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${Math.floor(Date.now() / 1000) - 86400}&period2=${Math.floor(Date.now() / 1000)}&interval=1d`;
-    const res = await fetch(proxyUrl(url), { headers: { Accept: "application/json" } });
+    const period2 = Math.floor(Date.now() / 1000);
+    const period1 = period2 - 86400 * 2;
+    const res = await fetch(
+      `${API_BASE}/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`,
+      { headers: { Accept: "application/json" } }
+    );
     if (!res.ok) return null;
     const json = await res.json();
     const result = json?.chart?.result?.[0];
