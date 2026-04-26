@@ -37,14 +37,9 @@ export function ResultsChart({ results }: Props) {
   results.forEach((r) => r.series.forEach((p) => allDates.add(p.date)));
   const sortedDates = [...allDates].sort((a, b) => a - b);
 
-  const initialValues: Record<string, number> = {};
+  const peakValues: Record<string, number> = {};
   results.forEach((r) => {
-    initialValues[r.portfolioId] = r.series[0]?.value ?? 0;
-  });
-
-  let peakValues: Record<string, number> = {};
-  results.forEach((r) => {
-    peakValues[r.portfolioId] = r.series[0]?.value ?? 0;
+    peakValues[r.portfolioId] = 0;
   });
 
   const chartData = sortedDates.map((date) => {
@@ -56,13 +51,14 @@ export function ResultsChart({ results }: Props) {
           point[r.portfolioId] = Math.round(match.value);
           point[`${r.portfolioId}_invested`] = Math.round(match.invested);
         } else if (mode === "return") {
-          const init = initialValues[r.portfolioId];
-          point[r.portfolioId] = init > 0 ? ((match.value - init) / init) * 100 : 0;
+          // 총 투자금 대비 수익률: 초기금 0원 적립식도 올바르게 처리
+          const invested = match.invested;
+          point[r.portfolioId] = invested > 0 ? ((match.value - invested) / invested) * 100 : 0;
         } else if (mode === "drawdown") {
           if (match.value > (peakValues[r.portfolioId] ?? 0)) {
             peakValues[r.portfolioId] = match.value;
           }
-          const peak = peakValues[r.portfolioId] ?? 1;
+          const peak = peakValues[r.portfolioId] ?? 0;
           point[r.portfolioId] = peak > 0 ? -((peak - match.value) / peak) * 100 : 0;
         }
       }
