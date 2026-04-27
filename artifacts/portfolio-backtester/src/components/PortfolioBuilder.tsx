@@ -18,20 +18,28 @@ interface Props {
 }
 
 const COLORS = [
-  "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7",
-  "#06B6D4", "#F97316", "#10B981", "#8B5CF6", "#EC4899",
+  "#3B82F6",
+  "#22C55E",
+  "#F59E0B",
+  "#EF4444",
+  "#A855F7",
+  "#06B6D4",
+  "#F97316",
+  "#10B981",
+  "#8B5CF6",
+  "#EC4899",
 ];
 
 const POPULAR_TICKERS = [
   { symbol: "SPY", name: "S&P 500" },
   { symbol: "QQQ", name: "나스닥 100" },
-  { symbol: "VTI", name: "미국 전체주식" },
-  { symbol: "IEF", name: "미국 중기채권" },
+  { symbol: "QLD", name: "나스닥 2배" },
+  { symbol: "TQQQ", name: "나스닥 3배" },
   { symbol: "GLD", name: "금 ETF" },
-  { symbol: "SCHD", name: "배당주 ETF" },
-  { symbol: "005930.KS", name: "삼성전자" },
-  { symbol: "069500.KS", name: "KODEX 200" },
-  { symbol: "360750.KS", name: "TIGER 미국S&P500" },
+  { symbol: "SCHD", name: "슈드" },
+  { symbol: "SCHG", name: "슈그" },
+  { symbol: "SHV", name: "미국 단기채권" },
+  { symbol: "UPRO", name: "S&P 3배" },
 ];
 
 export function PortfolioBuilder({ portfolios, onChange }: Props) {
@@ -75,7 +83,7 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
         };
         const holdings = [...p.holdings, newHolding];
         return { ...p, holdings: autoBalance(holdings) };
-      })
+      }),
     );
   }
 
@@ -85,7 +93,7 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
         if (p.id !== portfolioId) return p;
         const holdings = p.holdings.filter((h) => h.symbol !== symbol);
         return { ...p, holdings: autoBalance(holdings) };
-      })
+      }),
     );
   }
 
@@ -95,9 +103,11 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
         if (p.id !== portfolioId) return p;
         return {
           ...p,
-          holdings: p.holdings.map((h) => (h.symbol === symbol ? { ...h, weight } : h)),
+          holdings: p.holdings.map((h) =>
+            h.symbol === symbol ? { ...h, weight } : h,
+          ),
         };
-      })
+      }),
     );
   }
 
@@ -116,13 +126,17 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
       portfolios.map((p) => {
         if (p.id !== portfolioId) return p;
         return { ...p, holdings: autoBalance(p.holdings) };
-      })
+      }),
     );
   }
 
   const activePortfolio = portfolios.find((p) => p.id === activeTab);
-  const totalWeight = activePortfolio?.holdings.reduce((s, h) => s + h.weight, 0) ?? 0;
-  const weightError = Math.abs(totalWeight - 100) > 0.5 && activePortfolio && activePortfolio.holdings.length > 0;
+  const totalWeight =
+    activePortfolio?.holdings.reduce((s, h) => s + h.weight, 0) ?? 0;
+  const weightError =
+    Math.abs(totalWeight - 100) > 0.5 &&
+    activePortfolio &&
+    activePortfolio.holdings.length > 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -136,7 +150,7 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
               "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all whitespace-nowrap",
               activeTab === p.id
                 ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted",
             )}
           >
             <span
@@ -169,7 +183,9 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
               data-testid="input-portfolio-label"
               type="text"
               value={activePortfolio.label}
-              onChange={(e) => updatePortfolioLabel(activePortfolio.id, e.target.value)}
+              onChange={(e) =>
+                updatePortfolioLabel(activePortfolio.id, e.target.value)
+              }
               className="flex-1 bg-transparent border-0 border-b border-dashed border-border text-sm font-medium outline-none focus:border-primary transition-colors py-0.5"
               placeholder="포트폴리오 이름"
             />
@@ -190,10 +206,14 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
           />
 
           <div className="flex flex-col gap-1.5">
-            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide px-0.5">인기 종목 빠른 추가</p>
+            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide px-0.5">
+              인기 종목 빠른 추가
+            </p>
             <div className="grid grid-cols-3 gap-1.5">
               {POPULAR_TICKERS.map((t) => {
-                const alreadyAdded = activePortfolio.holdings.some((h) => h.symbol === t.symbol);
+                const alreadyAdded = activePortfolio.holdings.some(
+                  (h) => h.symbol === t.symbol,
+                );
                 return (
                   <button
                     key={t.symbol}
@@ -212,11 +232,15 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
                       "flex flex-col items-start px-2 py-1.5 rounded-md border text-left transition-all",
                       alreadyAdded
                         ? "border-border bg-muted opacity-50 cursor-not-allowed"
-                        : "border-border bg-card hover:border-primary/50 hover:bg-primary/5 cursor-pointer"
+                        : "border-border bg-card hover:border-primary/50 hover:bg-primary/5 cursor-pointer",
                     )}
                   >
-                    <span className="font-mono text-[10px] font-bold text-primary leading-tight">{t.symbol}</span>
-                    <span className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate w-full">{t.name}</span>
+                    <span className="font-mono text-[10px] font-bold text-primary leading-tight">
+                      {t.symbol}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate w-full">
+                      {t.name}
+                    </span>
                   </button>
                 );
               })}
@@ -235,7 +259,12 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
                   >
                     균등 배분
                   </button>
-                  <span className={cn("font-mono font-semibold", weightError ? "text-destructive" : "text-foreground")}>
+                  <span
+                    className={cn(
+                      "font-mono font-semibold",
+                      weightError ? "text-destructive" : "text-foreground",
+                    )}
+                  >
                     합계: {totalWeight.toFixed(1)}%
                   </span>
                 </div>
@@ -249,9 +278,13 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-primary">{holding.symbol}</span>
+                      <span className="font-mono text-xs font-semibold text-primary">
+                        {holding.symbol}
+                      </span>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{holding.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {holding.name}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -261,13 +294,21 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
                       max={100}
                       step={0.1}
                       value={holding.weight}
-                      onChange={(e) => updateWeight(activePortfolio.id, holding.symbol, parseFloat(e.target.value) || 0)}
+                      onChange={(e) =>
+                        updateWeight(
+                          activePortfolio.id,
+                          holding.symbol,
+                          parseFloat(e.target.value) || 0,
+                        )
+                      }
                       className="w-16 text-right border border-border rounded px-2 py-1 text-sm font-mono bg-background outline-none focus:ring-1 focus:ring-primary/50"
                     />
                     <span className="text-sm text-muted-foreground w-4">%</span>
                     <button
                       data-testid={`button-remove-holding-${holding.symbol}`}
-                      onClick={() => removeHolding(activePortfolio.id, holding.symbol)}
+                      onClick={() =>
+                        removeHolding(activePortfolio.id, holding.symbol)
+                      }
                       className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
                     >
                       <X className="w-4 h-4" />
@@ -279,14 +320,19 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
               {weightError && (
                 <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 px-3 py-2 rounded-lg">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                  비중의 합이 100%가 아닙니다. 균등 배분 버튼을 누르거나 직접 조정하세요.
+                  비중의 합이 100%가 아닙니다. 균등 배분 버튼을 누르거나 직접
+                  조정하세요.
                 </div>
               )}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-8 text-center border-2 border-dashed border-border rounded-lg">
-              <p className="text-sm text-muted-foreground">위에서 종목을 검색하여 추가하세요</p>
-              <p className="text-xs text-muted-foreground mt-1">한국(KS, KQ)과 미국 종목 모두 지원합니다</p>
+              <p className="text-sm text-muted-foreground">
+                위에서 종목을 검색하여 추가하세요
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                한국(KS, KQ)과 미국 종목 모두 지원합니다
+              </p>
             </div>
           )}
         </div>
@@ -297,7 +343,13 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
 
 function X({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
       <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   );
