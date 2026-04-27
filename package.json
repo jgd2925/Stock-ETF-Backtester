@@ -2,6 +2,7 @@
   "name": "workspace",
   "version": "0.0.0",
   "license": "MIT",
+  "packageManager": "pnpm@10.26.1",
   "scripts": {
     "preinstall": "echo 'Skipping preinstall check'",
     "prebuild": "pnpm install --no-frozen-lockfile",
