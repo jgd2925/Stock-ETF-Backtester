@@ -1,5 +1,6 @@
 name = "backtester"
 compatibility_date = "2026-04-27"
+main = "worker.js"
 
 [assets]
 directory = "./dist/public"

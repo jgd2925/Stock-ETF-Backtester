@@ -3,7 +3,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    if (path === "/api/finance/search" || path.startsWith("/api/finance/search?")) {
+    if (path === "/api/finance/search") {
       const q = url.searchParams.get("q") || "";
       if (!q) {
         return new Response(JSON.stringify({ quotes: [] }), {
@@ -62,11 +62,6 @@ export default {
       }
     }
 
-    const assetResponse = await env.ASSETS.fetch(request);
-    if (assetResponse.status === 404) {
-      const indexRequest = new Request(new URL("/index.html", request.url).toString());
-      return env.ASSETS.fetch(indexRequest);
-    }
-    return assetResponse;
+    return env.ASSETS.fetch(request);
   },
 };
