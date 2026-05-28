@@ -226,6 +226,7 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
                         longName: t.name,
                         exchange: "",
                         quoteType: "ETF",
+                        market: "",
                       })
                     }
                     className={cn(

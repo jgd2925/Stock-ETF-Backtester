@@ -53,7 +53,7 @@ export async function fetchHistoricalData(
   symbol: string,
   startDate: Date,
   endDate: Date
-): Promise<{ prices: HistoricalData[]; dividends: DividendData[] }> {
+): Promise<{ prices: HistoricalData[]; dividends: DividendData[]; currency: string }> {
   const period1 = Math.floor(startDate.getTime() / 1000);
   const period2 = Math.floor(endDate.getTime() / 1000);
 
@@ -88,7 +88,8 @@ export async function fetchHistoricalData(
     return { date: div.date * 1000, amount: div.amount };
   });
 
-  return { prices, dividends };
+  const currency: string = result.meta?.currency ?? "USD";
+  return { prices, dividends, currency };
 }
 
 export async function fetchQuote(symbol: string): Promise<{ price: number; currency: string; name: string } | null> {

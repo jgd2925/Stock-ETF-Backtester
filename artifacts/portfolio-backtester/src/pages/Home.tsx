@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  RefreshCw,
 } from "lucide-react";
 
 const PORTFOLIO_COLORS = [
@@ -158,6 +159,7 @@ export default function Home() {
 
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [fxConverted, setFxConverted] = useState(false);
   const [activeResultTab, setActiveResultTab] = useState<
     "chart" | "metrics" | "annual"
   >("chart");
@@ -186,6 +188,7 @@ export default function Home() {
 
     setRunning(true);
     setResults([]);
+    setFxConverted(false);
 
     try {
       const allSymbols = new Set<string>();
@@ -193,7 +196,7 @@ export default function Home() {
         p.holdings.forEach((h) => allSymbols.add(h.symbol)),
       );
 
-      const dataMap: Record<string, { prices: any[]; dividends: any[] }> = {};
+      const dataMap: Record<string, { prices: any[]; dividends: any[]; currency: string }> = {};
       const fetchResults = await Promise.allSettled(
         [...allSymbols].map(async (symbol) => {
           const data = await fetchHistoricalData(
@@ -220,8 +223,53 @@ export default function Home() {
         );
       }
 
+      // 통화 혼용 감지 및 환율 변환
+      const loadedSymbols = Object.keys(dataMap);
+      const hasKRW = loadedSymbols.some((s) => dataMap[s].currency === "KRW");
+      const hasUSD = loadedSymbols.some((s) => dataMap[s].currency === "USD");
+
+      if (hasKRW && hasUSD) {
+        try {
+          const fxData = await fetchHistoricalData("USDKRW=X", options.startDate, options.endDate);
+          const fxPrices = fxData.prices;
+
+          function getFxRate(date: number): number {
+            if (fxPrices.length === 0) return 1300;
+            let closest = fxPrices[0];
+            for (const p of fxPrices) {
+              if (Math.abs(p.date - date) < Math.abs(closest.date - date)) closest = p;
+            }
+            return closest.adjClose > 0 ? closest.adjClose : 1300;
+          }
+
+          for (const symbol of loadedSymbols) {
+            if (dataMap[symbol].currency === "USD") {
+              dataMap[symbol].prices = dataMap[symbol].prices.map((p: any) => {
+                const rate = getFxRate(p.date);
+                return {
+                  ...p,
+                  open: p.open * rate,
+                  high: p.high * rate,
+                  low: p.low * rate,
+                  close: p.close * rate,
+                  adjClose: p.adjClose * rate,
+                };
+              });
+              dataMap[symbol].dividends = dataMap[symbol].dividends.map((d: any) => ({
+                ...d,
+                amount: d.amount * getFxRate(d.date),
+              }));
+              dataMap[symbol].currency = "KRW";
+            }
+          }
+          setFxConverted(true);
+        } catch {
+          setError("환율(USDKRW) 데이터를 불러오지 못했습니다. USD 자산이 원화 자산과 비교되면 결과가 부정확할 수 있습니다.");
+        }
+      }
+
       const backtestResults: BacktestResult[] = validPortfolios.map(
-        (p, idx) => {
+        (p) => {
           const assetsData = p.holdings
             .filter((h) => dataMap[h.symbol])
             .map((h) => ({
@@ -427,6 +475,12 @@ export default function Home() {
               </div>
             ) : (
               <>
+                {fxConverted && (
+                  <div className="flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-2.5 text-xs text-blue-700 dark:text-blue-300">
+                    <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+                    USD 자산 가격이 기간별 실제 USD/KRW 환율로 원화 환산되어 계산되었습니다.
+                  </div>
+                )}
                 <div className="bg-card border border-card-border rounded-xl shadow-sm overflow-hidden">
                   <div className="border-b border-border flex items-center gap-1 px-4 py-0">
                     {(["chart", "metrics", "annual"] as const).map((tab) => (
