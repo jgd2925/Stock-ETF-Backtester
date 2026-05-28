@@ -23,9 +23,12 @@ const REBALANCE_OPTIONS = [
 ] as const;
 
 export function BacktestSettings({ options, onChange }: Props) {
+  const today = new Date();
+  today.setDate(1);
+  const maxDate = today;
+
   function setPresetPeriod(years: number) {
-    const end = new Date();
-    end.setDate(1);
+    const end = options.endDate > maxDate ? maxDate : options.endDate;
     const start = new Date(end);
     start.setFullYear(start.getFullYear() - years);
     onChange({ ...options, startDate: start, endDate: end });
@@ -80,12 +83,22 @@ export function BacktestSettings({ options, onChange }: Props) {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">종료일</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-muted-foreground">종료일</label>
+              <button
+                type="button"
+                onClick={() => onChange({ ...options, endDate: maxDate })}
+                className="text-[10px] text-primary hover:underline"
+              >
+                현재까지
+              </button>
+            </div>
             <input
               data-testid="input-end-date"
               type="month"
               value={toInputDate(options.endDate)}
               min={toInputDate(options.startDate)}
+              max={toInputDate(maxDate)}
               onChange={(e) => {
                 const [y, m] = e.target.value.split("-").map(Number);
                 if (!y || !m) return;
