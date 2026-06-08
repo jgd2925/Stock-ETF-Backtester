@@ -7,10 +7,21 @@ import { NavHeader } from "@/components/NavHeader";
 import { AuthModal } from "@/components/AuthModal";
 import { SymbolSearch } from "@/components/SymbolSearch";
 import { useAuth } from "@/contexts/AuthContext";
-import { getTrades, addTrade, deleteTrade, type LocalTrade } from "@/lib/localTrades";
 import { fetchQuote } from "@/lib/api";
 import type { SearchResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+interface ApiTrade {
+  id: string;
+  userId: string;
+  symbol: string;
+  name: string;
+  type: "buy" | "sell";
+  quantity: string;
+  price: string;
+  currency: string;
+  createdAt: string;
+}
 
 interface Holding {
   symbol: string;
@@ -22,18 +33,30 @@ interface Holding {
   loadingPrice: boolean;
 }
 
-function computeHoldings(trades: LocalTrade[]): Record<string, Omit<Holding, "currentPrice" | "loadingPrice">> {
+async function apiFetch(path: string, options?: RequestInit) {
+  const res = await fetch(`/api${path}`, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, data };
+}
+
+function computeHoldings(trades: ApiTrade[]): Record<string, Omit<Holding, "currentPrice" | "loadingPrice">> {
   const map: Record<string, { quantity: number; totalCost: number; currency: string; name: string }> = {};
   for (const t of trades) {
+    const qty = parseFloat(t.quantity);
+    const price = parseFloat(t.price);
     if (!map[t.symbol]) map[t.symbol] = { quantity: 0, totalCost: 0, currency: t.currency, name: t.name };
     const h = map[t.symbol];
     if (t.type === "buy") {
-      h.totalCost += t.quantity * t.price;
-      h.quantity += t.quantity;
+      h.totalCost += qty * price;
+      h.quantity += qty;
     } else {
       const avg = h.quantity > 0 ? h.totalCost / h.quantity : 0;
-      h.quantity -= t.quantity;
-      h.totalCost -= t.quantity * avg;
+      h.quantity -= qty;
+      h.totalCost -= qty * avg;
       if (h.quantity <= 0) { h.quantity = 0; h.totalCost = 0; }
     }
   }
@@ -70,7 +93,8 @@ export default function PaperTrading() {
   const [authOpen, setAuthOpen] = useState(false);
   const [tab, setTab] = useState<"holdings" | "history">("holdings");
 
-  const [trades, setTrades] = useState<LocalTrade[]>([]);
+  const [trades, setTrades] = useState<ApiTrade[]>([]);
+  const [loadingTrades, setLoadingTrades] = useState(false);
   const [holdings, setHoldings] = useState<Holding[]>([]);
 
   const [selectedSymbol, setSelectedSymbol] = useState<SearchResult | null>(null);
@@ -87,17 +111,18 @@ export default function PaperTrading() {
     setIsDark((d) => !d);
   }
 
-  const loadTrades = useCallback(() => {
+  const loadTrades = useCallback(async () => {
     if (!user) return;
-    setTrades(getTrades(user.userId));
+    setLoadingTrades(true);
+    const { ok, data } = await apiFetch("/trades");
+    if (ok) setTrades(data as ApiTrade[]);
+    setLoadingTrades(false);
   }, [user]);
 
-  useEffect(() => {
-    loadTrades();
-  }, [loadTrades]);
+  useEffect(() => { loadTrades(); }, [loadTrades]);
 
-  const refreshHoldingPrices = useCallback(async (baseHoldings: Omit<Holding, "currentPrice" | "loadingPrice">[]) => {
-    const withLoading: Holding[] = baseHoldings.map((h) => ({ ...h, currentPrice: null, loadingPrice: true }));
+  const refreshHoldingPrices = useCallback(async (base: Omit<Holding, "currentPrice" | "loadingPrice">[]) => {
+    const withLoading: Holding[] = base.map((h) => ({ ...h, currentPrice: null, loadingPrice: true }));
     setHoldings(withLoading);
     const updated = await Promise.all(
       withLoading.map(async (h) => {
@@ -113,17 +138,13 @@ export default function PaperTrading() {
   }, []);
 
   useEffect(() => {
-    const map = computeHoldings(trades);
-    refreshHoldingPrices(Object.values(map));
+    refreshHoldingPrices(Object.values(computeHoldings(trades)));
   }, [trades, refreshHoldingPrices]);
 
   useEffect(() => {
     if (!selectedSymbol) { setQuoteData(null); return; }
     setLoadingQuote(true);
-    fetchQuote(selectedSymbol.symbol).then((q) => {
-      setQuoteData(q);
-      setLoadingQuote(false);
-    });
+    fetchQuote(selectedSymbol.symbol).then((q) => { setQuoteData(q); setLoadingQuote(false); });
   }, [selectedSymbol]);
 
   async function executeTrade() {
@@ -142,37 +163,39 @@ export default function PaperTrading() {
 
     setTradeError(null);
     setSubmitting(true);
-
-    addTrade(user.userId, {
-      userId: user.userId,
-      symbol: selectedSymbol.symbol,
-      name: quoteData.name || selectedSymbol.shortName,
-      type: tradeType,
-      quantity: qty,
-      price: quoteData.price,
-      currency: quoteData.currency,
+    const { ok, data } = await apiFetch("/trades", {
+      method: "POST",
+      body: JSON.stringify({
+        symbol: selectedSymbol.symbol,
+        name: quoteData.name || selectedSymbol.shortName,
+        type: tradeType,
+        quantity: qty,
+        price: quoteData.price,
+        currency: quoteData.currency,
+      }),
     });
 
-    setTradeSuccess(`${selectedSymbol.symbol} ${qty}주 ${tradeType === "buy" ? "매수" : "매도"} 완료`);
-    setQuantity("");
-    setSelectedSymbol(null);
-    setQuoteData(null);
-    loadTrades();
-    setTimeout(() => setTradeSuccess(null), 3000);
+    if (!ok) {
+      setTradeError((data as any).error ?? "거래 오류가 발생했습니다.");
+    } else {
+      setTradeSuccess(`${selectedSymbol.symbol} ${qty}주 ${tradeType === "buy" ? "매수" : "매도"} 완료`);
+      setQuantity("");
+      setSelectedSymbol(null);
+      setQuoteData(null);
+      await loadTrades();
+      setTimeout(() => setTradeSuccess(null), 3000);
+    }
     setSubmitting(false);
   }
 
-  function handleDeleteTrade(id: string) {
-    if (!user || !confirm("이 거래를 삭제하시겠습니까?")) return;
-    deleteTrade(user.userId, id);
-    loadTrades();
+  async function handleDeleteTrade(id: string) {
+    if (!confirm("이 거래를 삭제하시겠습니까?")) return;
+    await apiFetch(`/trades/${id}`, { method: "DELETE" });
+    await loadTrades();
   }
 
-  const totalValue = holdings.reduce((sum, h) => {
-    if (h.currentPrice === null) return sum;
-    return sum + h.quantity * h.currentPrice;
-  }, 0);
-  const totalCost = holdings.reduce((sum, h) => sum + h.quantity * h.avgCost, 0);
+  const totalValue = holdings.reduce((s, h) => h.currentPrice !== null ? s + h.quantity * h.currentPrice : s, 0);
+  const totalCost = holdings.reduce((s, h) => s + h.quantity * h.avgCost, 0);
   const totalPnl = totalValue - totalCost;
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
   const mixedCurrency = holdings.length > 0 && new Set(holdings.map((h) => h.currency)).size > 1;
@@ -221,26 +244,20 @@ export default function PaperTrading() {
 
                 <div className="flex gap-1 bg-muted rounded-lg p-1">
                   {(["buy", "sell"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => { setTradeType(t); setTradeError(null); }}
+                    <button key={t} onClick={() => { setTradeType(t); setTradeError(null); }}
                       className={cn(
                         "flex-1 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center justify-center gap-1",
                         t === "buy"
                           ? tradeType === "buy" ? "bg-green-500 text-white shadow" : "text-muted-foreground hover:text-foreground"
                           : tradeType === "sell" ? "bg-red-500 text-white shadow" : "text-muted-foreground hover:text-foreground"
-                      )}
-                    >
+                      )}>
                       {t === "buy" ? <Plus className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
                       {t === "buy" ? "매수" : "매도"}
                     </button>
                   ))}
                 </div>
 
-                <SymbolSearch
-                  onSelect={(r) => { setSelectedSymbol(r); setTradeError(null); }}
-                  placeholder="종목 검색..."
-                />
+                <SymbolSearch onSelect={(r) => { setSelectedSymbol(r); setTradeError(null); }} placeholder="종목 검색..." />
 
                 {selectedSymbol && (
                   <div className="bg-muted/60 rounded-lg p-3 flex items-center justify-between">
@@ -249,18 +266,13 @@ export default function PaperTrading() {
                       <p className="text-xs text-muted-foreground truncate max-w-[160px]">{selectedSymbol.shortName}</p>
                     </div>
                     <div className="text-right">
-                      {loadingQuote ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-muted-foreground ml-auto" />
-                      ) : quoteData ? (
-                        <>
-                          <p className="text-sm font-mono font-bold text-foreground">
-                            {formatPrice(quoteData.price, quoteData.currency)}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">{quoteData.currency}</p>
-                        </>
-                      ) : (
-                        <p className="text-xs text-destructive">시세 조회 실패</p>
-                      )}
+                      {loadingQuote ? <Loader2 className="w-4 h-4 animate-spin text-muted-foreground ml-auto" /> :
+                        quoteData ? (
+                          <>
+                            <p className="text-sm font-mono font-bold text-foreground">{formatPrice(quoteData.price, quoteData.currency)}</p>
+                            <p className="text-[10px] text-muted-foreground">{quoteData.currency}</p>
+                          </>
+                        ) : <p className="text-xs text-destructive">시세 조회 실패</p>}
                     </div>
                   </div>
                 )}
@@ -268,122 +280,79 @@ export default function PaperTrading() {
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-muted-foreground">수량 (주)</label>
                   <div className="flex items-center gap-2 border border-border bg-background rounded-md px-3 py-2 focus-within:ring-1 focus-within:ring-primary/50 focus-within:border-primary transition-all">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.0001"
-                      value={quantity}
+                    <input type="number" min="0" step="0.0001" value={quantity}
                       onChange={(e) => { setQuantity(e.target.value); setTradeError(null); }}
-                      placeholder="0"
-                      className="flex-1 bg-transparent outline-none text-sm font-mono"
-                    />
+                      placeholder="0" className="flex-1 bg-transparent outline-none text-sm font-mono" />
                     <span className="text-xs text-muted-foreground">주</span>
                   </div>
                   {quoteData && quantity && parseFloat(quantity) > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      ≈ {formatPrice(quoteData.price * parseFloat(quantity), quoteData.currency)}
-                    </p>
+                    <p className="text-xs text-muted-foreground">≈ {formatPrice(quoteData.price * parseFloat(quantity), quoteData.currency)}</p>
                   )}
                 </div>
 
                 {tradeError && (
                   <div className="flex items-start gap-2 bg-destructive/10 border border-destructive/20 rounded-lg p-3 text-xs text-destructive">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    {tradeError}
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />{tradeError}
                   </div>
                 )}
                 {tradeSuccess && (
-                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-xs text-green-600 dark:text-green-400">
-                    {tradeSuccess}
-                  </div>
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 text-xs text-green-600 dark:text-green-400">{tradeSuccess}</div>
                 )}
 
-                <button
-                  onClick={executeTrade}
+                <button onClick={executeTrade}
                   disabled={submitting || !selectedSymbol || !quoteData || !quantity}
                   className={cn(
                     "flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all",
                     submitting || !selectedSymbol || !quoteData || !quantity
                       ? "bg-muted text-muted-foreground cursor-not-allowed"
-                      : tradeType === "buy"
-                        ? "bg-green-500 text-white hover:bg-green-600"
-                        : "bg-red-500 text-white hover:bg-red-600"
-                  )}
-                >
-                  {submitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : tradeType === "buy" ? (
-                    <><Plus className="w-4 h-4" />매수 주문</>
-                  ) : (
-                    <><Minus className="w-4 h-4" />매도 주문</>
-                  )}
+                      : tradeType === "buy" ? "bg-green-500 text-white hover:bg-green-600" : "bg-red-500 text-white hover:bg-red-600"
+                  )}>
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                    tradeType === "buy" ? <><Plus className="w-4 h-4" />매수 주문</> : <><Minus className="w-4 h-4" />매도 주문</>}
                 </button>
               </div>
 
               {holdings.length > 0 && (
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    {
-                      label: "총 평가금액",
-                      value: mixedCurrency ? "—" : formatValue(totalValue, holdings[0]?.currency ?? "USD"),
-                      positive: undefined as boolean | undefined,
-                      sub: null as string | null,
-                    },
-                    {
-                      label: "평가손익",
-                      value: mixedCurrency ? "—" : (totalPnl >= 0 ? "+" : "") + formatValue(totalPnl, holdings[0]?.currency ?? "USD"),
-                      sub: `${totalPnlPct >= 0 ? "+" : ""}${totalPnlPct.toFixed(2)}%`,
-                      positive: totalPnl >= 0,
-                    },
+                    { label: "총 평가금액", value: mixedCurrency ? "—" : formatValue(totalValue, holdings[0]?.currency ?? "USD"), positive: undefined as boolean | undefined, sub: null as string | null },
+                    { label: "평가손익", value: mixedCurrency ? "—" : (totalPnl >= 0 ? "+" : "") + formatValue(totalPnl, holdings[0]?.currency ?? "USD"), sub: `${totalPnlPct >= 0 ? "+" : ""}${totalPnlPct.toFixed(2)}%`, positive: totalPnl >= 0 },
                   ].map((card) => (
                     <div key={card.label} className="bg-card border border-border rounded-xl p-3 shadow-sm">
                       <p className="text-[10px] text-muted-foreground mb-1">{card.label}</p>
                       <p className={cn("text-sm font-mono font-bold",
                         card.positive === undefined ? "text-foreground" : card.positive ? "text-green-600 dark:text-green-400" : "text-red-500"
-                      )}>
-                        {card.value}
-                      </p>
-                      {card.sub && (
-                        <p className={cn("text-[10px] font-mono", card.positive ? "text-green-500" : "text-red-500")}>
-                          {card.sub}
-                        </p>
-                      )}
+                      )}>{card.value}</p>
+                      {card.sub && <p className={cn("text-[10px] font-mono", card.positive ? "text-green-500" : "text-red-500")}>{card.sub}</p>}
                     </div>
                   ))}
                 </div>
               )}
             </aside>
 
-            <section className="flex flex-col gap-4">
+            <section>
               <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
                 <div className="border-b border-border flex items-center px-4 py-0">
                   {(["holdings", "history"] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setTab(t)}
-                      className={cn(
-                        "px-4 py-3.5 text-xs font-medium border-b-2 transition-all -mb-px",
+                    <button key={t} onClick={() => setTab(t)}
+                      className={cn("px-4 py-3.5 text-xs font-medium border-b-2 transition-all -mb-px",
                         tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                      )}
-                    >
+                      )}>
                       {t === "holdings" ? `보유 종목 (${holdings.length})` : `거래 내역 (${trades.length})`}
                     </button>
                   ))}
-                  <button
-                    onClick={() => refreshHoldingPrices(Object.values(computeHoldings(trades)))}
-                    className="ml-auto p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-all"
-                    title="시세 새로고침"
-                  >
+                  <button onClick={() => refreshHoldingPrices(Object.values(computeHoldings(trades)))}
+                    className="ml-auto p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-all" title="시세 새로고침">
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
                 <div className="overflow-x-auto">
                   {tab === "holdings" ? (
-                    holdings.length === 0 ? (
-                      <div className="text-center py-12 text-sm text-muted-foreground">
-                        보유 종목이 없습니다. 왼쪽에서 종목을 매수해보세요.
-                      </div>
+                    loadingTrades ? (
+                      <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                    ) : holdings.length === 0 ? (
+                      <div className="text-center py-12 text-sm text-muted-foreground">보유 종목이 없습니다. 왼쪽에서 종목을 매수해보세요.</div>
                     ) : (
                       <table className="w-full text-xs">
                         <thead>
@@ -395,10 +364,10 @@ export default function PaperTrading() {
                         </thead>
                         <tbody>
                           {holdings.map((h) => {
-                            const currentVal = h.currentPrice !== null ? h.quantity * h.currentPrice : null;
-                            const costVal = h.quantity * h.avgCost;
-                            const pnl = currentVal !== null ? currentVal - costVal : null;
-                            const pnlPct = pnl !== null && costVal > 0 ? (pnl / costVal) * 100 : null;
+                            const cv = h.currentPrice !== null ? h.quantity * h.currentPrice : null;
+                            const cost = h.quantity * h.avgCost;
+                            const pnl = cv !== null ? cv - cost : null;
+                            const pct = pnl !== null && cost > 0 ? (pnl / cost) * 100 : null;
                             return (
                               <tr key={h.symbol} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                                 <td className="px-4 py-3">
@@ -408,29 +377,15 @@ export default function PaperTrading() {
                                 <td className="px-4 py-3 font-mono">{h.quantity % 1 === 0 ? h.quantity : h.quantity.toFixed(4)}</td>
                                 <td className="px-4 py-3 font-mono">{formatPrice(h.avgCost, h.currency)}</td>
                                 <td className="px-4 py-3 font-mono">
-                                  {h.loadingPrice ? (
-                                    <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                                  ) : h.currentPrice !== null ? (
-                                    formatPrice(h.currentPrice, h.currency)
-                                  ) : "—"}
+                                  {h.loadingPrice ? <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" /> :
+                                    h.currentPrice !== null ? formatPrice(h.currentPrice, h.currency) : "—"}
                                 </td>
-                                <td className="px-4 py-3 font-mono">
-                                  {currentVal !== null ? formatValue(currentVal, h.currency) : "—"}
+                                <td className="px-4 py-3 font-mono">{cv !== null ? formatValue(cv, h.currency) : "—"}</td>
+                                <td className={cn("px-4 py-3 font-mono font-semibold", pnl === null ? "" : pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500")}>
+                                  {pnl !== null ? <span className="flex items-center gap-0.5">{pnl >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}{(pnl >= 0 ? "+" : "") + formatValue(pnl, h.currency)}</span> : "—"}
                                 </td>
-                                <td className={cn("px-4 py-3 font-mono font-semibold",
-                                  pnl === null ? "" : pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"
-                                )}>
-                                  {pnl !== null ? (
-                                    <span className="flex items-center gap-0.5">
-                                      {pnl >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                                      {(pnl >= 0 ? "+" : "") + formatValue(pnl, h.currency)}
-                                    </span>
-                                  ) : "—"}
-                                </td>
-                                <td className={cn("px-4 py-3 font-mono font-semibold",
-                                  pnlPct === null ? "" : pnlPct >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"
-                                )}>
-                                  {pnlPct !== null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "—"}
+                                <td className={cn("px-4 py-3 font-mono font-semibold", pct === null ? "" : pct >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500")}>
+                                  {pct !== null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : "—"}
                                 </td>
                               </tr>
                             );
@@ -439,10 +394,10 @@ export default function PaperTrading() {
                       </table>
                     )
                   ) : (
-                    trades.length === 0 ? (
-                      <div className="text-center py-12 text-sm text-muted-foreground">
-                        거래 내역이 없습니다.
-                      </div>
+                    loadingTrades ? (
+                      <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                    ) : trades.length === 0 ? (
+                      <div className="text-center py-12 text-sm text-muted-foreground">거래 내역이 없습니다.</div>
                     ) : (
                       <table className="w-full text-xs">
                         <thead>
@@ -462,18 +417,13 @@ export default function PaperTrading() {
                               <td className="px-4 py-3">
                                 <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-semibold",
                                   t.type === "buy" ? "bg-green-500/15 text-green-600 dark:text-green-400" : "bg-red-500/15 text-red-500"
-                                )}>
-                                  {t.type === "buy" ? "매수" : "매도"}
-                                </span>
+                                )}>{t.type === "buy" ? "매수" : "매도"}</span>
                               </td>
-                              <td className="px-4 py-3 font-mono">{t.quantity % 1 === 0 ? t.quantity : Number(t.quantity).toFixed(4)}</td>
-                              <td className="px-4 py-3 font-mono">{formatPrice(t.price, t.currency)}</td>
-                              <td className="px-4 py-3 font-mono">{formatPrice(t.quantity * t.price, t.currency)}</td>
+                              <td className="px-4 py-3 font-mono">{Number(t.quantity) % 1 === 0 ? Number(t.quantity) : Number(t.quantity).toFixed(4)}</td>
+                              <td className="px-4 py-3 font-mono">{formatPrice(parseFloat(t.price), t.currency)}</td>
+                              <td className="px-4 py-3 font-mono">{formatPrice(parseFloat(t.quantity) * parseFloat(t.price), t.currency)}</td>
                               <td className="px-4 py-3">
-                                <button
-                                  onClick={() => handleDeleteTrade(t.id)}
-                                  className="p-1 text-muted-foreground hover:text-destructive transition-colors"
-                                >
+                                <button onClick={() => handleDeleteTrade(t.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </td>
