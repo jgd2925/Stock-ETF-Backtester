@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { BarChart3, Sun, Moon, LogIn, LogOut, TrendingUp, ChevronDown } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { AuthModal } from "@/components/AuthModal";
@@ -12,7 +12,7 @@ interface Props {
 
 export function NavHeader({ isDark, onToggleDark }: Props) {
   const { user, signOut } = useAuth();
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const [authOpen, setAuthOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
@@ -39,19 +39,19 @@ export function NavHeader({ isDark, onToggleDark }: Props) {
 
           <nav className="flex items-center gap-1 ml-2">
             {NAV_ITEMS.map((item) => (
-              <Link key={item.href} href={item.href}>
-                <a
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all",
-                    location === item.href
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                  )}
-                >
-                  {item.href === "/paper-trading" && <TrendingUp className="w-3.5 h-3.5" />}
-                  {item.label}
-                </a>
-              </Link>
+              <button
+                key={item.href}
+                onClick={() => navigate(item.href)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all",
+                  location === item.href
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
+              >
+                {item.href === "/paper-trading" && <TrendingUp className="w-3.5 h-3.5" />}
+                {item.label}
+              </button>
             ))}
           </nav>
 

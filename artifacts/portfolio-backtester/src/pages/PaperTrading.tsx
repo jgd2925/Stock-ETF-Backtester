@@ -59,7 +59,7 @@ function formatValue(value: number, currency: string) {
 }
 
 export default function PaperTrading() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, configured } = useAuth();
   const [isDark, setIsDark] = useState(() =>
     typeof window !== "undefined" ? document.documentElement.classList.contains("dark") : false
   );
