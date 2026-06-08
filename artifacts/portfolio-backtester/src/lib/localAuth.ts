@@ -4,7 +4,7 @@ const SESSION_KEY = "pt_session";
 export interface LocalUser {
   id: string;
   email: string;
-  passwordHash: string;
+  password: string;
 }
 
 export interface Session {
@@ -12,16 +12,7 @@ export interface Session {
   email: string;
 }
 
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function getUsers(): LocalUser[] {
+function getLocalUsers(): LocalUser[] {
   try {
     return JSON.parse(localStorage.getItem(USERS_KEY) ?? "[]");
   } catch {
@@ -29,7 +20,7 @@ function getUsers(): LocalUser[] {
   }
 }
 
-function saveUsers(users: LocalUser[]) {
+function saveLocalUsers(users: LocalUser[]) {
   localStorage.setItem(USERS_KEY, JSON.stringify(users));
 }
 
@@ -47,21 +38,34 @@ function saveSession(session: Session | null) {
   else localStorage.removeItem(SESSION_KEY);
 }
 
+async function fetchFileUsers(): Promise<LocalUser[]> {
+  try {
+    const res = await fetch("/users.json");
+    if (!res.ok) return [];
+    return (await res.json()) as LocalUser[];
+  } catch {
+    return [];
+  }
+}
+
 export async function signUp(
   email: string,
   password: string
 ): Promise<{ error: string | null; session: Session | null }> {
-  const users = getUsers();
-  if (users.find((u) => u.email.toLowerCase() === email.toLowerCase())) {
+  const fileUsers = await fetchFileUsers();
+  const localUsers = getLocalUsers();
+  const allEmails = [...fileUsers, ...localUsers].map((u) => u.email.toLowerCase());
+
+  if (allEmails.includes(email.toLowerCase())) {
     return { error: "이미 사용 중인 이메일입니다.", session: null };
   }
-  const passwordHash = await hashPassword(password);
+
   const newUser: LocalUser = {
     id: crypto.randomUUID(),
     email,
-    passwordHash,
+    password,
   };
-  saveUsers([...users, newUser]);
+  saveLocalUsers([...localUsers, newUser]);
   const session: Session = { userId: newUser.id, email: newUser.email };
   saveSession(session);
   return { error: null, session };
@@ -71,15 +75,18 @@ export async function signIn(
   email: string,
   password: string
 ): Promise<{ error: string | null; session: Session | null }> {
-  const users = getUsers();
-  const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+  const fileUsers = await fetchFileUsers();
+  const localUsers = getLocalUsers();
+  const allUsers = [...fileUsers, ...localUsers];
+
+  const user = allUsers.find(
+    (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
+  );
+
   if (!user) {
     return { error: "이메일 또는 비밀번호가 올바르지 않습니다.", session: null };
   }
-  const hash = await hashPassword(password);
-  if (hash !== user.passwordHash) {
-    return { error: "이메일 또는 비밀번호가 올바르지 않습니다.", session: null };
-  }
+
   const session: Session = { userId: user.id, email: user.email };
   saveSession(session);
   return { error: null, session };
