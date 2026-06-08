@@ -1,58 +1,44 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { User } from "@supabase/supabase-js";
-import { supabase, supabaseConfigured } from "@/lib/supabase";
+import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+  signIn as localSignIn,
+  signUp as localSignUp,
+  signOut as localSignOut,
+  getSession,
+  type Session,
+} from "@/lib/localAuth";
 
 interface AuthContextValue {
-  user: User | null;
+  user: Session | null;
   loading: boolean;
-  configured: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
-  signOut: () => Promise<void>;
+  signOut: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(supabaseConfigured);
-
-  useEffect(() => {
-    if (!supabaseConfigured) return;
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
+  const [user, setUser] = useState<Session | null>(() => getSession());
 
   async function signIn(email: string, password: string) {
-    if (!supabaseConfigured) return { error: "Supabase가 설정되지 않았습니다." };
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    const { error, session } = await localSignIn(email, password);
+    if (session) setUser(session);
+    return { error };
   }
 
   async function signUp(email: string, password: string) {
-    if (!supabaseConfigured) return { error: "Supabase가 설정되지 않았습니다." };
-    const { error } = await supabase.auth.signUp({ email, password });
-    return { error: error?.message ?? null };
+    const { error, session } = await localSignUp(email, password);
+    if (session) setUser(session);
+    return { error };
   }
 
-  async function signOut() {
-    if (!supabaseConfigured) return;
-    await supabase.auth.signOut();
+  function signOut() {
+    localSignOut();
+    setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, configured: supabaseConfigured, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading: false, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );

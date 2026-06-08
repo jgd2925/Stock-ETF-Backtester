@@ -7,7 +7,7 @@ import { NavHeader } from "@/components/NavHeader";
 import { AuthModal } from "@/components/AuthModal";
 import { SymbolSearch } from "@/components/SymbolSearch";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase, type PaperTrade } from "@/lib/supabase";
+import { getTrades, addTrade, deleteTrade, type LocalTrade } from "@/lib/localTrades";
 import { fetchQuote } from "@/lib/api";
 import type { SearchResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -22,7 +22,7 @@ interface Holding {
   loadingPrice: boolean;
 }
 
-function computeHoldings(trades: PaperTrade[]): Record<string, Omit<Holding, "currentPrice" | "loadingPrice">> {
+function computeHoldings(trades: LocalTrade[]): Record<string, Omit<Holding, "currentPrice" | "loadingPrice">> {
   const map: Record<string, { quantity: number; totalCost: number; currency: string; name: string }> = {};
   for (const t of trades) {
     if (!map[t.symbol]) map[t.symbol] = { quantity: 0, totalCost: 0, currency: t.currency, name: t.name };
@@ -40,7 +40,11 @@ function computeHoldings(trades: PaperTrade[]): Record<string, Omit<Holding, "cu
   return Object.fromEntries(
     Object.entries(map)
       .filter(([, h]) => h.quantity > 0.0001)
-      .map(([symbol, h]) => [symbol, { symbol, name: h.name, quantity: h.quantity, avgCost: h.quantity > 0 ? h.totalCost / h.quantity : 0, currency: h.currency }])
+      .map(([symbol, h]) => [symbol, {
+        symbol, name: h.name, quantity: h.quantity,
+        avgCost: h.quantity > 0 ? h.totalCost / h.quantity : 0,
+        currency: h.currency,
+      }])
   );
 }
 
@@ -59,16 +63,14 @@ function formatValue(value: number, currency: string) {
 }
 
 export default function PaperTrading() {
-  const { user, loading: authLoading, configured } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [isDark, setIsDark] = useState(() =>
     typeof window !== "undefined" ? document.documentElement.classList.contains("dark") : false
   );
   const [authOpen, setAuthOpen] = useState(false);
   const [tab, setTab] = useState<"holdings" | "history">("holdings");
 
-  const [trades, setTrades] = useState<PaperTrade[]>([]);
-  const [loadingTrades, setLoadingTrades] = useState(false);
-
+  const [trades, setTrades] = useState<LocalTrade[]>([]);
   const [holdings, setHoldings] = useState<Holding[]>([]);
 
   const [selectedSymbol, setSelectedSymbol] = useState<SearchResult | null>(null);
@@ -85,16 +87,9 @@ export default function PaperTrading() {
     setIsDark((d) => !d);
   }
 
-  const loadTrades = useCallback(async () => {
+  const loadTrades = useCallback(() => {
     if (!user) return;
-    setLoadingTrades(true);
-    const { data, error } = await supabase
-      .from("paper_trades")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: true });
-    if (!error && data) setTrades(data as PaperTrade[]);
-    setLoadingTrades(false);
+    setTrades(getTrades(user.userId));
   }, [user]);
 
   useEffect(() => {
@@ -119,8 +114,7 @@ export default function PaperTrading() {
 
   useEffect(() => {
     const map = computeHoldings(trades);
-    const list = Object.values(map);
-    refreshHoldingPrices(list);
+    refreshHoldingPrices(Object.values(map));
   }, [trades, refreshHoldingPrices]);
 
   useEffect(() => {
@@ -148,8 +142,9 @@ export default function PaperTrading() {
 
     setTradeError(null);
     setSubmitting(true);
-    const { error } = await supabase.from("paper_trades").insert({
-      user_id: user.id,
+
+    addTrade(user.userId, {
+      userId: user.userId,
       symbol: selectedSymbol.symbol,
       name: quoteData.name || selectedSymbol.shortName,
       type: tradeType,
@@ -158,34 +153,28 @@ export default function PaperTrading() {
       currency: quoteData.currency,
     });
 
-    if (error) {
-      setTradeError(error.message);
-    } else {
-      setTradeSuccess(`${selectedSymbol.symbol} ${qty}주 ${tradeType === "buy" ? "매수" : "매도"} 완료`);
-      setQuantity("");
-      setSelectedSymbol(null);
-      setQuoteData(null);
-      await loadTrades();
-      setTimeout(() => setTradeSuccess(null), 3000);
-    }
+    setTradeSuccess(`${selectedSymbol.symbol} ${qty}주 ${tradeType === "buy" ? "매수" : "매도"} 완료`);
+    setQuantity("");
+    setSelectedSymbol(null);
+    setQuoteData(null);
+    loadTrades();
+    setTimeout(() => setTradeSuccess(null), 3000);
     setSubmitting(false);
   }
 
-  async function deleteTrade(id: string) {
-    if (!confirm("이 거래를 삭제하시겠습니까?")) return;
-    await supabase.from("paper_trades").delete().eq("id", id);
-    await loadTrades();
+  function handleDeleteTrade(id: string) {
+    if (!user || !confirm("이 거래를 삭제하시겠습니까?")) return;
+    deleteTrade(user.userId, id);
+    loadTrades();
   }
 
   const totalValue = holdings.reduce((sum, h) => {
     if (h.currentPrice === null) return sum;
     return sum + h.quantity * h.currentPrice;
   }, 0);
-
   const totalCost = holdings.reduce((sum, h) => sum + h.quantity * h.avgCost, 0);
   const totalPnl = totalValue - totalCost;
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
-
   const mixedCurrency = holdings.length > 0 && new Set(holdings.map((h) => h.currency)).size > 1;
 
   if (authLoading) {
@@ -331,13 +320,14 @@ export default function PaperTrading() {
                 </button>
               </div>
 
-              {!loadingTrades && holdings.length > 0 && (
+              {holdings.length > 0 && (
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     {
                       label: "총 평가금액",
                       value: mixedCurrency ? "—" : formatValue(totalValue, holdings[0]?.currency ?? "USD"),
-                      sub: null,
+                      positive: undefined as boolean | undefined,
+                      sub: null as string | null,
                     },
                     {
                       label: "평가손익",
@@ -348,7 +338,9 @@ export default function PaperTrading() {
                   ].map((card) => (
                     <div key={card.label} className="bg-card border border-border rounded-xl p-3 shadow-sm">
                       <p className="text-[10px] text-muted-foreground mb-1">{card.label}</p>
-                      <p className={cn("text-sm font-mono font-bold", card.positive === undefined ? "text-foreground" : card.positive ? "text-green-600 dark:text-green-400" : "text-red-500")}>
+                      <p className={cn("text-sm font-mono font-bold",
+                        card.positive === undefined ? "text-foreground" : card.positive ? "text-green-600 dark:text-green-400" : "text-red-500"
+                      )}>
                         {card.value}
                       </p>
                       {card.sub && (
@@ -374,7 +366,7 @@ export default function PaperTrading() {
                         tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                       )}
                     >
-                      {t === "holdings" ? `보유 종목 (${holdings.filter((h) => (h.currentPrice ?? 0) > 0 || h.loadingPrice).length})` : "거래 내역"}
+                      {t === "holdings" ? `보유 종목 (${holdings.length})` : `거래 내역 (${trades.length})`}
                     </button>
                   ))}
                   <button
@@ -386,13 +378,9 @@ export default function PaperTrading() {
                   </button>
                 </div>
 
-                <div className="p-0 overflow-x-auto">
+                <div className="overflow-x-auto">
                   {tab === "holdings" ? (
-                    loadingTrades ? (
-                      <div className="flex justify-center py-12">
-                        <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                      </div>
-                    ) : holdings.length === 0 ? (
+                    holdings.length === 0 ? (
                       <div className="text-center py-12 text-sm text-muted-foreground">
                         보유 종목이 없습니다. 왼쪽에서 종목을 매수해보세요.
                       </div>
@@ -429,7 +417,9 @@ export default function PaperTrading() {
                                 <td className="px-4 py-3 font-mono">
                                   {currentVal !== null ? formatValue(currentVal, h.currency) : "—"}
                                 </td>
-                                <td className={cn("px-4 py-3 font-mono font-semibold", pnl === null ? "" : pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500")}>
+                                <td className={cn("px-4 py-3 font-mono font-semibold",
+                                  pnl === null ? "" : pnl >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"
+                                )}>
                                   {pnl !== null ? (
                                     <span className="flex items-center gap-0.5">
                                       {pnl >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
@@ -437,7 +427,9 @@ export default function PaperTrading() {
                                     </span>
                                   ) : "—"}
                                 </td>
-                                <td className={cn("px-4 py-3 font-mono font-semibold", pnlPct === null ? "" : pnlPct >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500")}>
+                                <td className={cn("px-4 py-3 font-mono font-semibold",
+                                  pnlPct === null ? "" : pnlPct >= 0 ? "text-green-600 dark:text-green-400" : "text-red-500"
+                                )}>
                                   {pnlPct !== null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "—"}
                                 </td>
                               </tr>
@@ -447,11 +439,7 @@ export default function PaperTrading() {
                       </table>
                     )
                   ) : (
-                    loadingTrades ? (
-                      <div className="flex justify-center py-12">
-                        <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                      </div>
-                    ) : trades.length === 0 ? (
+                    trades.length === 0 ? (
                       <div className="text-center py-12 text-sm text-muted-foreground">
                         거래 내역이 없습니다.
                       </div>
@@ -468,13 +456,13 @@ export default function PaperTrading() {
                           {[...trades].reverse().map((t) => (
                             <tr key={t.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
                               <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                                {new Date(t.created_at).toLocaleDateString("ko-KR", { year: "2-digit", month: "2-digit", day: "2-digit" })}
+                                {new Date(t.createdAt).toLocaleDateString("ko-KR", { year: "2-digit", month: "2-digit", day: "2-digit" })}
                               </td>
+                              <td className="px-4 py-3 font-mono font-bold text-primary">{t.symbol}</td>
                               <td className="px-4 py-3">
-                                <span className="font-mono font-bold text-primary">{t.symbol}</span>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-semibold", t.type === "buy" ? "bg-green-500/15 text-green-600 dark:text-green-400" : "bg-red-500/15 text-red-500")}>
+                                <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-semibold",
+                                  t.type === "buy" ? "bg-green-500/15 text-green-600 dark:text-green-400" : "bg-red-500/15 text-red-500"
+                                )}>
                                   {t.type === "buy" ? "매수" : "매도"}
                                 </span>
                               </td>
@@ -483,9 +471,8 @@ export default function PaperTrading() {
                               <td className="px-4 py-3 font-mono">{formatPrice(t.quantity * t.price, t.currency)}</td>
                               <td className="px-4 py-3">
                                 <button
-                                  onClick={() => deleteTrade(t.id)}
+                                  onClick={() => handleDeleteTrade(t.id)}
                                   className="p-1 text-muted-foreground hover:text-destructive transition-colors"
-                                  title="거래 삭제"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>

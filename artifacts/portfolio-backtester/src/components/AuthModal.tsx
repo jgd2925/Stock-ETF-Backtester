@@ -15,24 +15,22 @@ export function AuthModal({ open, onClose }: Props) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
   if (!open) return null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setSuccess(null);
     setLoading(true);
 
-    if (tab === "signin") {
-      const { error } = await signIn(email, password);
-      if (error) setError(error);
-      else onClose();
+    const { error } = tab === "signin"
+      ? await signIn(email, password)
+      : await signUp(email, password);
+
+    if (error) {
+      setError(error);
     } else {
-      const { error } = await signUp(email, password);
-      if (error) setError(error);
-      else setSuccess("인증 이메일을 발송했습니다. 이메일을 확인해 주세요.");
+      onClose();
     }
     setLoading(false);
   }
@@ -59,7 +57,7 @@ export function AuthModal({ open, onClose }: Props) {
           {(["signin", "signup"] as const).map((t) => (
             <button
               key={t}
-              onClick={() => { setTab(t); setError(null); setSuccess(null); }}
+              onClick={() => { setTab(t); setError(null); }}
               className={cn(
                 "flex-1 py-1.5 text-xs font-medium rounded-md transition-all",
                 tab === t
@@ -102,11 +100,6 @@ export function AuthModal({ open, onClose }: Props) {
               {error}
             </p>
           )}
-          {success && (
-            <p className="text-xs text-green-600 dark:text-green-400 bg-green-500/10 border border-green-500/20 rounded-md px-3 py-2">
-              {success}
-            </p>
-          )}
 
           <button
             type="submit"
@@ -116,18 +109,16 @@ export function AuthModal({ open, onClose }: Props) {
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : tab === "signin" ? (
-              <>
-                <LogIn className="w-4 h-4" />
-                로그인
-              </>
+              <><LogIn className="w-4 h-4" />로그인</>
             ) : (
-              <>
-                <UserPlus className="w-4 h-4" />
-                회원가입
-              </>
+              <><UserPlus className="w-4 h-4" />회원가입</>
             )}
           </button>
         </form>
+
+        <p className="text-[10px] text-muted-foreground text-center mt-4">
+          계정 정보는 이 브라우저에만 저장됩니다
+        </p>
       </div>
     </div>
   );
