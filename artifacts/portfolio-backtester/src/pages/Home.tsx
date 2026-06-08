@@ -4,6 +4,7 @@ import { BacktestSettings } from "@/components/BacktestSettings";
 import { ResultsChart } from "@/components/ResultsChart";
 import { ResultsTable } from "@/components/ResultsTable";
 import { AnnualReturnsTable } from "@/components/AnnualReturnsTable";
+import { NavHeader } from "@/components/NavHeader";
 import { fetchHistoricalData } from "@/lib/api";
 import { runBacktest } from "@/lib/backtest";
 import type { BacktestOptions, BacktestResult } from "@/lib/backtest";
@@ -13,8 +14,6 @@ import {
   Loader2,
   BarChart3,
   AlertCircle,
-  Sun,
-  Moon,
   ChevronDown,
   ChevronUp,
   Download,
@@ -306,35 +305,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card sticky top-0 z-40 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <BarChart3 className="w-4.5 h-4.5 text-primary-foreground" />
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-foreground leading-none">
-                포트폴리오 백테스터
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                한국 · 미국 주식/ETF 비교 분석
-              </p>
-            </div>
-          </div>
-          <button
-            data-testid="button-toggle-dark"
-            onClick={toggleDark}
-            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-            title={isDark ? "라이트 모드" : "다크 모드"}
-          >
-            {isDark ? (
-              <Sun className="w-4 h-4" />
-            ) : (
-              <Moon className="w-4 h-4" />
-            )}
-          </button>
-        </div>
-      </header>
+      <NavHeader isDark={isDark} onToggleDark={toggleDark} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-[550px_1fr] gap-6">
