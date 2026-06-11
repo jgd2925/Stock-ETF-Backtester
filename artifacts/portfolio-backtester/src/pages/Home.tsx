@@ -4,6 +4,7 @@ import { BacktestSettings } from "@/components/BacktestSettings";
 import { ResultsChart } from "@/components/ResultsChart";
 import { ResultsTable } from "@/components/ResultsTable";
 import { AnnualReturnsTable } from "@/components/AnnualReturnsTable";
+import { SymbolBreakdown } from "@/components/SymbolBreakdown";
 import { NavHeader } from "@/components/NavHeader";
 import { fetchHistoricalData } from "@/lib/api";
 import { runBacktest } from "@/lib/backtest";
@@ -160,7 +161,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [fxConverted, setFxConverted] = useState(false);
   const [activeResultTab, setActiveResultTab] = useState<
-    "chart" | "metrics" | "annual"
+    "chart" | "metrics" | "annual" | "symbols"
   >("chart");
   const [settingsOpen, setSettingsOpen] = useState(true);
 
@@ -454,13 +455,13 @@ export default function Home() {
                 )}
                 <div className="bg-card border border-card-border rounded-xl shadow-sm overflow-hidden">
                   <div className="border-b border-border flex items-center gap-1 px-4 py-0">
-                    {(["chart", "metrics", "annual"] as const).map((tab) => (
+                    {(["chart", "metrics", "annual", "symbols"] as const).map((tab) => (
                       <button
                         key={tab}
                         data-testid={`tab-result-${tab}`}
                         onClick={() => setActiveResultTab(tab)}
                         className={cn(
-                          "px-4 py-3.5 text-xs font-medium border-b-2 transition-all -mb-px",
+                          "px-3 sm:px-4 py-3.5 text-xs font-medium border-b-2 transition-all -mb-px whitespace-nowrap",
                           activeResultTab === tab
                             ? "border-primary text-primary"
                             : "border-transparent text-muted-foreground hover:text-foreground",
@@ -470,7 +471,9 @@ export default function Home() {
                           ? "차트"
                           : tab === "metrics"
                             ? "성과 지표"
-                            : "연도별 수익률"}
+                            : tab === "annual"
+                              ? "연도별 수익률"
+                              : "종목별 분석"}
                       </button>
                     ))}
                     <div className="ml-auto">
@@ -494,6 +497,9 @@ export default function Home() {
                     )}
                     {activeResultTab === "annual" && (
                       <AnnualReturnsTable results={results} />
+                    )}
+                    {activeResultTab === "symbols" && (
+                      <SymbolBreakdown results={results} />
                     )}
                   </div>
                 </div>

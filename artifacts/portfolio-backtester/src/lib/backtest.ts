@@ -24,6 +24,27 @@ export interface MonthlyPoint {
   contributions: number;
 }
 
+export interface SymbolSeriesPoint {
+  date: number;
+  value: number;
+}
+
+export interface SymbolResult {
+  symbol: string;
+  name: string;
+  weight: number;
+  investedAmount: number;
+  finalValue: number;
+  gainLoss: number;
+  totalReturn: number;
+  cagr: number;
+  maxDrawdown: number;
+  volatility: number;
+  totalDividends: number;
+  annualReturns: Record<number, number>;
+  series: SymbolSeriesPoint[];
+}
+
 export interface BacktestResult {
   portfolioId: string;
   label: string;
@@ -38,6 +59,7 @@ export interface BacktestResult {
   totalDividends: number;
   totalContributions: number;
   finalValue: number;
+  symbolResults: SymbolResult[];
 }
 
 interface AssetData {
@@ -60,9 +82,7 @@ function findClosestPrice(prices: HistoricalData[], date: number): number {
   if (prices.length === 0) return 0;
   let closest = prices[0];
   for (const p of prices) {
-    if (Math.abs(p.date - date) < Math.abs(closest.date - date)) {
-      closest = p;
-    }
+    if (Math.abs(p.date - date) < Math.abs(closest.date - date)) closest = p;
   }
   return closest.adjClose;
 }
@@ -86,6 +106,75 @@ function getYearKey(date: number): string {
   return `${new Date(date).getFullYear()}`;
 }
 
+function computeSymbolMetrics(
+  h: Holding,
+  series: SymbolSeriesPoint[],
+  investedAmount: number,
+  totalDividends: number,
+  dates: number[]
+): SymbolResult {
+  const finalVal = series[series.length - 1]?.value ?? 0;
+  const gainLoss = finalVal - investedAmount;
+  const totalReturn = investedAmount > 0 ? (gainLoss / investedAmount) * 100 : 0;
+
+  const years = dates.length > 1
+    ? (dates[dates.length - 1] - dates[0]) / (1000 * 60 * 60 * 24 * 365.25)
+    : 0;
+  const cagr =
+    years > 0 && investedAmount > 0 && finalVal > 0
+      ? (Math.pow(finalVal / investedAmount, 1 / years) - 1) * 100
+      : 0;
+
+  let maxDrawdown = 0;
+  let peak = series[0]?.value ?? 0;
+  for (const p of series) {
+    if (p.value > peak) peak = p.value;
+    const dd = peak > 0 ? ((peak - p.value) / peak) * 100 : 0;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+  }
+
+  // Monthly returns → volatility
+  const monthlyReturns: number[] = [];
+  for (let i = 1; i < series.length; i++) {
+    const prev = series[i - 1].value;
+    const curr = series[i].value;
+    if (prev > 0) monthlyReturns.push((curr - prev) / prev);
+  }
+  const avgR = monthlyReturns.reduce((a, b) => a + b, 0) / (monthlyReturns.length || 1);
+  const variance = monthlyReturns.reduce((s, r) => s + Math.pow(r - avgR, 2), 0) / (monthlyReturns.length || 1);
+  const volatility = Math.sqrt(variance) * Math.sqrt(12) * 100;
+
+  // Annual returns per symbol
+  const byYear: Record<number, SymbolSeriesPoint[]> = {};
+  series.forEach((p) => {
+    const y = new Date(p.date).getFullYear();
+    if (!byYear[y]) byYear[y] = [];
+    byYear[y].push(p);
+  });
+  const annualReturns: Record<number, number> = {};
+  Object.entries(byYear).forEach(([yearStr, pts]) => {
+    const first = pts[0].value;
+    const last = pts[pts.length - 1].value;
+    annualReturns[parseInt(yearStr)] = first > 0 ? ((last - first) / first) * 100 : 0;
+  });
+
+  return {
+    symbol: h.symbol,
+    name: h.name,
+    weight: h.weight,
+    investedAmount,
+    finalValue: finalVal,
+    gainLoss,
+    totalReturn,
+    cagr,
+    maxDrawdown,
+    volatility,
+    totalDividends,
+    annualReturns,
+    series,
+  };
+}
+
 export function runBacktest(
   holdings: Holding[],
   assetsData: AssetData[],
@@ -95,9 +184,7 @@ export function runBacktest(
   color: string
 ): BacktestResult {
   const dates = alignDates(assetsData);
-  if (dates.length < 2) {
-    return emptyResult(portfolioId, label, color);
-  }
+  if (dates.length < 2) return emptyResult(portfolioId, label, color);
 
   const weightMap: Record<string, number> = {};
   holdings.forEach((h) => (weightMap[h.symbol] = h.weight / 100));
@@ -119,10 +206,18 @@ export function runBacktest(
   let totalDividends = 0;
   let totalContributions = options.initialAmount;
 
+  // Per-symbol tracking
+  const symbolInvested: Record<string, number> = {};
+  const symbolDividends: Record<string, number> = {};
+  const symbolValueSeries: Record<string, SymbolSeriesPoint[]> = {};
+
   holdings.forEach((h) => {
     const alloc = options.initialAmount * weightMap[h.symbol];
     const price = initialPrices[h.symbol];
     shares[h.symbol] = price > 0 ? alloc / price : 0;
+    symbolInvested[h.symbol] = alloc;
+    symbolDividends[h.symbol] = 0;
+    symbolValueSeries[h.symbol] = [];
   });
 
   const series: MonthlyPoint[] = [];
@@ -136,6 +231,14 @@ export function runBacktest(
     }, 0);
   }
 
+  function recordSymbolValues(date: number) {
+    holdings.forEach((h) => {
+      const price = findClosestPrice(priceMap[h.symbol] ?? [], date);
+      symbolValueSeries[h.symbol].push({ date, value: (shares[h.symbol] ?? 0) * price });
+    });
+  }
+
+  recordSymbolValues(dates[0]);
   series.push({
     date: dates[0],
     value: portfolioValue(dates[0]),
@@ -154,6 +257,7 @@ export function runBacktest(
         const divAmount = divs * (shares[h.symbol] ?? 0);
         dividendsThisPeriod += divAmount;
         totalDividends += divAmount;
+        symbolDividends[h.symbol] = (symbolDividends[h.symbol] ?? 0) + divAmount;
 
         if (options.reinvestDividends) {
           const price = findClosestPrice(priceMap[h.symbol] ?? [], date);
@@ -172,6 +276,7 @@ export function runBacktest(
 
       holdings.forEach((h) => {
         const alloc = contributionThisPeriod * weightMap[h.symbol];
+        symbolInvested[h.symbol] = (symbolInvested[h.symbol] ?? 0) + alloc;
         const price = findClosestPrice(priceMap[h.symbol] ?? [], date);
         if (price > 0) shares[h.symbol] = (shares[h.symbol] ?? 0) + alloc / price;
       });
@@ -196,6 +301,7 @@ export function runBacktest(
       prevRebalanceKey = rebalKey;
     }
 
+    recordSymbolValues(date);
     series.push({
       date,
       value: portfolioValue(date),
@@ -237,6 +343,16 @@ export function runBacktest(
   const positiveMonths = returns.filter((r) => r > 0).length;
   const winRate = returns.length > 0 ? (positiveMonths / returns.length) * 100 : 0;
 
+  const symbolResults: SymbolResult[] = holdings.map((h) =>
+    computeSymbolMetrics(
+      h,
+      symbolValueSeries[h.symbol] ?? [],
+      symbolInvested[h.symbol] ?? 0,
+      symbolDividends[h.symbol] ?? 0,
+      dates
+    )
+  );
+
   return {
     portfolioId,
     label,
@@ -251,6 +367,7 @@ export function runBacktest(
     totalDividends,
     totalContributions,
     finalValue,
+    symbolResults,
   };
 }
 
@@ -269,5 +386,6 @@ function emptyResult(portfolioId: string, label: string, color: string): Backtes
     totalDividends: 0,
     totalContributions: 0,
     finalValue: 0,
+    symbolResults: [],
   };
 }
