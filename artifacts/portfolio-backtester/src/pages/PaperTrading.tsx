@@ -7,10 +7,21 @@ import { NavHeader } from "@/components/NavHeader";
 import { AuthModal } from "@/components/AuthModal";
 import { SymbolSearch } from "@/components/SymbolSearch";
 import { useAuth } from "@/contexts/AuthContext";
-import { getTrades, addTrade, deleteTrade, type LocalTrade } from "@/lib/localTrades";
 import { fetchQuote } from "@/lib/api";
 import type { SearchResult } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+interface Trade {
+  id: string;
+  userId: string;
+  symbol: string;
+  name: string;
+  type: "buy" | "sell";
+  quantity: string;
+  price: string;
+  currency: string;
+  createdAt: string;
+}
 
 interface Holding {
   symbol: string;
@@ -22,18 +33,20 @@ interface Holding {
   loadingPrice: boolean;
 }
 
-function computeHoldings(trades: LocalTrade[]): Record<string, Omit<Holding, "currentPrice" | "loadingPrice">> {
+function computeHoldings(trades: Trade[]): Record<string, Omit<Holding, "currentPrice" | "loadingPrice">> {
   const map: Record<string, { quantity: number; totalCost: number; currency: string; name: string }> = {};
   for (const t of trades) {
+    const qty = parseFloat(t.quantity);
+    const price = parseFloat(t.price);
     if (!map[t.symbol]) map[t.symbol] = { quantity: 0, totalCost: 0, currency: t.currency, name: t.name };
     const h = map[t.symbol];
     if (t.type === "buy") {
-      h.totalCost += t.quantity * t.price;
-      h.quantity += t.quantity;
+      h.totalCost += qty * price;
+      h.quantity += qty;
     } else {
       const avg = h.quantity > 0 ? h.totalCost / h.quantity : 0;
-      h.quantity -= t.quantity;
-      h.totalCost -= t.quantity * avg;
+      h.quantity -= qty;
+      h.totalCost -= qty * avg;
       if (h.quantity <= 0) { h.quantity = 0; h.totalCost = 0; }
     }
   }
@@ -70,7 +83,8 @@ export default function PaperTrading() {
   const [authOpen, setAuthOpen] = useState(false);
   const [tab, setTab] = useState<"holdings" | "history">("holdings");
 
-  const [trades, setTrades] = useState<LocalTrade[]>([]);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [tradesLoading, setTradesLoading] = useState(false);
   const [holdings, setHoldings] = useState<Holding[]>([]);
 
   const [selectedSymbol, setSelectedSymbol] = useState<SearchResult | null>(null);
@@ -87,9 +101,15 @@ export default function PaperTrading() {
     setIsDark((d) => !d);
   }
 
-  const loadTrades = useCallback(() => {
+  const loadTrades = useCallback(async () => {
     if (!user) return;
-    setTrades(getTrades(user.userId));
+    setTradesLoading(true);
+    try {
+      const r = await fetch("/api/trades", { credentials: "include" });
+      if (r.ok) setTrades(await r.json());
+    } finally {
+      setTradesLoading(false);
+    }
   }, [user]);
 
   useEffect(() => { loadTrades(); }, [loadTrades]);
@@ -136,30 +156,40 @@ export default function PaperTrading() {
 
     setTradeError(null);
     setSubmitting(true);
-
-    addTrade(user.userId, {
-      userId: user.userId,
-      symbol: selectedSymbol.symbol,
-      name: quoteData.name || selectedSymbol.shortName,
-      type: tradeType,
-      quantity: qty,
-      price: quoteData.price,
-      currency: quoteData.currency,
-    });
-
-    setTradeSuccess(`${selectedSymbol.symbol} ${qty}주 ${tradeType === "buy" ? "매수" : "매도"} 완료`);
-    setQuantity("");
-    setSelectedSymbol(null);
-    setQuoteData(null);
-    loadTrades();
-    setTimeout(() => setTradeSuccess(null), 3000);
-    setSubmitting(false);
+    try {
+      const r = await fetch("/api/trades", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: selectedSymbol.symbol,
+          name: quoteData.name || selectedSymbol.shortName,
+          type: tradeType,
+          quantity: qty,
+          price: quoteData.price,
+          currency: quoteData.currency,
+        }),
+      });
+      if (!r.ok) {
+        const d = await r.json();
+        setTradeError(d.error ?? "거래에 실패했습니다.");
+        return;
+      }
+      setTradeSuccess(`${selectedSymbol.symbol} ${qty}주 ${tradeType === "buy" ? "매수" : "매도"} 완료`);
+      setQuantity("");
+      setSelectedSymbol(null);
+      setQuoteData(null);
+      await loadTrades();
+      setTimeout(() => setTradeSuccess(null), 3000);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleDeleteTrade(id: string) {
-    if (!user || !confirm("이 거래를 삭제하시겠습니까?")) return;
-    deleteTrade(user.userId, id);
-    loadTrades();
+  async function handleDeleteTrade(id: string) {
+    if (!confirm("이 거래를 삭제하시겠습니까?")) return;
+    await fetch(`/api/trades/${id}`, { method: "DELETE", credentials: "include" });
+    await loadTrades();
   }
 
   const totalValue = holdings.reduce((s, h) => h.currentPrice !== null ? s + h.quantity * h.currentPrice : s, 0);
@@ -315,7 +345,11 @@ export default function PaperTrading() {
 
                 <div className="overflow-x-auto">
                   {tab === "holdings" ? (
-                    holdings.length === 0 ? (
+                    tradesLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : holdings.length === 0 ? (
                       <div className="text-center py-12 text-sm text-muted-foreground">보유 종목이 없습니다. 왼쪽에서 종목을 매수해보세요.</div>
                     ) : (
                       <table className="w-full text-xs">
@@ -358,7 +392,11 @@ export default function PaperTrading() {
                       </table>
                     )
                   ) : (
-                    trades.length === 0 ? (
+                    tradesLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : trades.length === 0 ? (
                       <div className="text-center py-12 text-sm text-muted-foreground">거래 내역이 없습니다.</div>
                     ) : (
                       <table className="w-full text-xs">
@@ -381,9 +419,9 @@ export default function PaperTrading() {
                                   t.type === "buy" ? "bg-green-500/15 text-green-600 dark:text-green-400" : "bg-red-500/15 text-red-500"
                                 )}>{t.type === "buy" ? "매수" : "매도"}</span>
                               </td>
-                              <td className="px-4 py-3 font-mono">{t.quantity % 1 === 0 ? t.quantity : Number(t.quantity).toFixed(4)}</td>
-                              <td className="px-4 py-3 font-mono">{formatPrice(t.price, t.currency)}</td>
-                              <td className="px-4 py-3 font-mono">{formatPrice(t.quantity * t.price, t.currency)}</td>
+                              <td className="px-4 py-3 font-mono">{parseFloat(t.quantity) % 1 === 0 ? parseFloat(t.quantity) : parseFloat(t.quantity).toFixed(4)}</td>
+                              <td className="px-4 py-3 font-mono">{formatPrice(parseFloat(t.price), t.currency)}</td>
+                              <td className="px-4 py-3 font-mono">{formatPrice(parseFloat(t.quantity) * parseFloat(t.price), t.currency)}</td>
                               <td className="px-4 py-3">
                                 <button onClick={() => handleDeleteTrade(t.id)} className="p-1 text-muted-foreground hover:text-destructive transition-colors">
                                   <Trash2 className="w-3.5 h-3.5" />

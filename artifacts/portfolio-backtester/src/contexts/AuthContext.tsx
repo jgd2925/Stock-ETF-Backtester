@@ -1,44 +1,65 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
-import {
-  signIn as localSignIn,
-  signUp as localSignUp,
-  signOut as localSignOut,
-  getSession,
-  type Session,
-} from "@/lib/localAuth";
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+
+export interface AuthUser {
+  id: string;
+  email: string;
+}
 
 interface AuthContextValue {
-  user: Session | null;
+  user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<Session | null>(() => getSession());
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/auth/me", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setUser(data ?? null))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
+  }, []);
 
   async function signIn(email: string, password: string) {
-    const { error, session } = await localSignIn(email, password);
-    if (session) setUser(session);
-    return { error };
+    const r = await fetch("/api/auth/signin", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) return { error: data.error ?? "로그인에 실패했습니다." };
+    setUser(data);
+    return { error: null };
   }
 
   async function signUp(email: string, password: string) {
-    const { error, session } = await localSignUp(email, password);
-    if (session) setUser(session);
-    return { error };
+    const r = await fetch("/api/auth/signup", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) return { error: data.error ?? "회원가입에 실패했습니다." };
+    setUser(data);
+    return { error: null };
   }
 
-  function signOut() {
-    localSignOut();
+  async function signOut() {
+    await fetch("/api/auth/signout", { method: "POST", credentials: "include" });
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading: false, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );
