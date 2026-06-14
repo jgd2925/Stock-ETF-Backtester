@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useLocation } from "wouter";
 import { PortfolioBuilder } from "@/components/PortfolioBuilder";
 import { BacktestSettings } from "@/components/BacktestSettings";
 import { ResultsChart } from "@/components/ResultsChart";
@@ -9,6 +10,7 @@ import { NavHeader } from "@/components/NavHeader";
 import { fetchHistoricalData } from "@/lib/api";
 import { runBacktest } from "@/lib/backtest";
 import type { BacktestOptions, BacktestResult } from "@/lib/backtest";
+import { saveTargetPortfolio } from "@/lib/localTrades";
 import { cn } from "@/lib/utils";
 import {
   Play,
@@ -19,6 +21,8 @@ import {
   ChevronUp,
   Download,
   RefreshCw,
+  TrendingUp,
+  CheckCircle2,
 } from "lucide-react";
 
 const PORTFOLIO_COLORS = [
@@ -133,16 +137,28 @@ function exportCsv(results: BacktestResult[]) {
 }
 
 export default function Home() {
+  const [, navigate] = useLocation();
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== "undefined") {
       return document.documentElement.classList.contains("dark");
     }
     return false;
   });
-
   const [portfolios, setPortfolios] = useState<Portfolio[]>(
     () => loadFromStorage()?.portfolios ?? defaultPortfolios(),
   );
+  const [appliedPortfolioId, setAppliedPortfolioId] = useState<string | null>(null);
+
+  function applyToMockTrading(portfolioId: string, label: string, color: string) {
+    const portfolio = portfolios.find((p) => p.id === portfolioId);
+    if (!portfolio) return;
+    saveTargetPortfolio({ label, color, holdings: portfolio.holdings });
+    setAppliedPortfolioId(portfolioId);
+    setTimeout(() => {
+      setAppliedPortfolioId(null);
+      navigate("/paper-trading");
+    }, 800);
+  }
   const [options, setOptions] = useState<BacktestOptions>(
     () => loadFromStorage()?.options ?? defaultOptions(),
   );
@@ -326,6 +342,39 @@ export default function Home() {
                   onChange={setPortfolios}
                 />
               </div>
+              {/* Apply to paper trading — shown when portfolios are valid */}
+              {portfolios.some(
+                (p) => p.holdings.length > 0 && Math.abs(p.holdings.reduce((s, h) => s + h.weight, 0) - 100) <= 1
+              ) && (
+                <div className="border-t border-border px-5 py-3">
+                  <p className="text-[10px] text-muted-foreground mb-2 flex items-center gap-1">
+                    <TrendingUp className="w-3 h-3" />
+                    모의투자에 적용
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {portfolios
+                      .filter((p) => p.holdings.length > 0 && Math.abs(p.holdings.reduce((s, h) => s + h.weight, 0) - 100) <= 1)
+                      .map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => applyToMockTrading(p.id, p.label, p.color)}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                            appliedPortfolioId === p.id
+                              ? "bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400"
+                              : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                          )}
+                        >
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                          {p.label}
+                          {appliedPortfolioId === p.id
+                            ? <CheckCircle2 className="w-3 h-3" />
+                            : <TrendingUp className="w-3 h-3 opacity-60" />}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="bg-card border border-card-border rounded-xl shadow-sm overflow-hidden">
@@ -576,6 +625,19 @@ export default function Home() {
                           </div>
                         </div>
                       </div>
+                      <button
+                        onClick={() => applyToMockTrading(r.portfolioId, r.label, r.color)}
+                        className={cn(
+                          "mt-3 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium border transition-all",
+                          appliedPortfolioId === r.portfolioId
+                            ? "bg-green-500/10 border-green-500/30 text-green-600 dark:text-green-400"
+                            : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                        )}
+                      >
+                        {appliedPortfolioId === r.portfolioId
+                          ? <><CheckCircle2 className="w-3 h-3" />모의투자 이동 중...</>
+                          : <><TrendingUp className="w-3 h-3" />모의투자에 적용</>}
+                      </button>
                     </div>
                   ))}
                 </div>
