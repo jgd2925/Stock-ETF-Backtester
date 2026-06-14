@@ -26,10 +26,10 @@ export function NavHeader({ isDark, onToggleDark }: Props) {
             <BarChart3 className="w-4 h-4 text-primary-foreground" />
           </div>
           <div className="hidden sm:block">
-            <p className="text-sm font-bold text-foreground leading-none">포트폴리오 백테스터</p>
+            <p className="text-sm font-bold text-foreground leading-none">JGD LAB</p>
             <p className="text-xs text-muted-foreground">한국 · 미국 주식/ETF</p>
           </div>
-          <p className="sm:hidden text-sm font-bold text-foreground">백테스터</p>
+          <p className="sm:hidden text-sm font-bold text-foreground">JGD LAB</p>
         </button>
 
         <nav className="flex items-center gap-0.5 sm:gap-1 ml-1 sm:ml-2">
