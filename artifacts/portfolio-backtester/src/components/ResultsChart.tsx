@@ -1,14 +1,8 @@
 import { useState } from "react";
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  ReferenceLine,
+  AreaChart, Area,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, ReferenceLine,
 } from "recharts";
 import type { BacktestResult } from "@/lib/backtest";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -20,27 +14,23 @@ interface Props {
 
 type ChartMode = "value" | "return" | "drawdown";
 
-const MODE_OPTIONS: { value: ChartMode; label: string }[] = [
-  { value: "value", label: "포트폴리오 가치" },
-  { value: "return", label: "수익률 (%)" },
-  { value: "drawdown", label: "최대 낙폭" },
+const MODE_OPTIONS: { value: ChartMode; label: string; desc: string }[] = [
+  { value: "value",    label: "포트폴리오 가치", desc: "총 자산 추이" },
+  { value: "return",   label: "수익률",          desc: "투자 대비 %" },
+  { value: "drawdown", label: "낙폭",            desc: "고점 대비 하락" },
 ];
 
 export function ResultsChart({ results }: Props) {
   const [mode, setMode] = useState<ChartMode>("value");
 
-  if (results.length === 0 || results.every((r) => r.series.length === 0)) {
-    return null;
-  }
+  if (results.length === 0 || results.every((r) => r.series.length === 0)) return null;
 
   const allDates = new Set<number>();
   results.forEach((r) => r.series.forEach((p) => allDates.add(p.date)));
   const sortedDates = [...allDates].sort((a, b) => a - b);
 
   const peakValues: Record<string, number> = {};
-  results.forEach((r) => {
-    peakValues[r.portfolioId] = 0;
-  });
+  results.forEach((r) => { peakValues[r.portfolioId] = 0; });
 
   const chartData = sortedDates.map((date) => {
     const point: Record<string, string | number> = { date: formatDate(date) };
@@ -49,17 +39,13 @@ export function ResultsChart({ results }: Props) {
       if (match) {
         if (mode === "value") {
           point[r.portfolioId] = Math.round(match.value);
-          point[`${r.portfolioId}_invested`] = Math.round(match.invested);
         } else if (mode === "return") {
-          // 총 투자금 대비 수익률: 초기금 0원 적립식도 올바르게 처리
           const invested = match.invested;
-          point[r.portfolioId] = invested > 0 ? ((match.value - invested) / invested) * 100 : 0;
-        } else if (mode === "drawdown") {
-          if (match.value > (peakValues[r.portfolioId] ?? 0)) {
-            peakValues[r.portfolioId] = match.value;
-          }
+          point[r.portfolioId] = invested > 0 ? parseFloat(((match.value - invested) / invested * 100).toFixed(2)) : 0;
+        } else {
+          if (match.value > (peakValues[r.portfolioId] ?? 0)) peakValues[r.portfolioId] = match.value;
           const peak = peakValues[r.portfolioId] ?? 0;
-          point[r.portfolioId] = peak > 0 ? -((peak - match.value) / peak) * 100 : 0;
+          point[r.portfolioId] = peak > 0 ? parseFloat((-((peak - match.value) / peak) * 100).toFixed(2)) : 0;
         }
       }
     });
@@ -68,41 +54,53 @@ export function ResultsChart({ results }: Props) {
 
   function formatYAxis(value: number): string {
     if (mode === "value") {
-      if (Math.abs(value) >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(1)}조`;
+      if (Math.abs(value) >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(0)}조`;
       if (Math.abs(value) >= 100_000_000) return `${(value / 100_000_000).toFixed(0)}억`;
       if (Math.abs(value) >= 10_000) return `${(value / 10_000).toFixed(0)}만`;
       return `${Math.round(value)}`;
     }
-    return `${value.toFixed(1)}%`;
+    return `${value > 0 ? "+" : ""}${value.toFixed(0)}%`;
   }
 
-  function TooltipContent({ active, payload, label }: { active?: boolean; payload?: Array<{ color: string; name: string; value: number }>; label?: string }) {
+  function TooltipContent({
+    active, payload, label,
+  }: {
+    active?: boolean;
+    payload?: Array<{ color: string; name: string; value: number }>;
+    label?: string;
+  }) {
     if (!active || !payload || payload.length === 0) return null;
+    const sorted = [...payload].sort((a, b) => b.value - a.value);
     return (
-      <div className="bg-popover border border-popover-border rounded-lg shadow-lg p-3 text-sm min-w-48">
-        <p className="text-muted-foreground text-xs mb-2">{label}</p>
-        {payload.map((entry) => (
-          <div key={entry.name} className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-              <span className="text-foreground text-xs">
-                {results.find((r) => r.portfolioId === entry.name)?.label ?? entry.name}
+      <div className="bg-popover border border-popover-border rounded-xl shadow-xl p-3 text-sm min-w-52">
+        <p className="text-muted-foreground text-[10px] mb-2 font-medium">{label}</p>
+        {sorted.map((entry) => {
+          const label2 = results.find((r) => r.portfolioId === entry.name)?.label ?? entry.name;
+          const isPos = entry.value >= 0;
+          return (
+            <div key={entry.name} className="flex items-center justify-between gap-3 py-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
+                <span className="text-foreground text-xs">{label2}</span>
+              </div>
+              <span className={cn("font-mono font-semibold text-xs tabular-nums", mode !== "value" ? (isPos ? "text-green-600 dark:text-green-400" : "text-red-500") : "text-foreground")}>
+                {mode === "value"
+                  ? formatCurrency(entry.value, true)
+                  : `${isPos ? "+" : ""}${entry.value.toFixed(2)}%`}
               </span>
             </div>
-            <span className="font-mono font-semibold text-foreground text-xs">
-              {mode === "value"
-                ? formatCurrency(entry.value, true)
-                : `${entry.value >= 0 ? "+" : ""}${entry.value.toFixed(2)}%`}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   }
 
+  const isDrawdown = mode === "drawdown";
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-3">
+      {/* Mode selector */}
+      <div className="flex items-center gap-1 bg-muted rounded-lg p-1 w-fit">
         {MODE_OPTIONS.map((m) => (
           <button
             key={m.value}
@@ -111,8 +109,8 @@ export function ResultsChart({ results }: Props) {
             className={cn(
               "px-3 py-1.5 rounded-md text-xs font-medium transition-all",
               mode === m.value
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             )}
           >
             {m.label}
@@ -120,44 +118,56 @@ export function ResultsChart({ results }: Props) {
         ))}
       </div>
 
-      <div data-testid="chart-results" className="h-80">
+      {/* Gradient defs + chart */}
+      <div data-testid="chart-results" className="h-96 sm:h-[420px]">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
+          <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 4, bottom: 4 }}>
+            <defs>
+              {results.map((r) => (
+                <linearGradient key={r.portfolioId} id={`grad-${r.portfolioId}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={r.color} stopOpacity={isDrawdown ? 0.25 : 0.18} />
+                  <stop offset="85%" stopColor={r.color} stopOpacity={0.02} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
             <XAxis
               dataKey="date"
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               tickLine={false}
               axisLine={false}
               interval="preserveStartEnd"
+              minTickGap={60}
             />
             <YAxis
               tickFormatter={formatYAxis}
-              tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+              tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
               tickLine={false}
               axisLine={false}
-              width={60}
+              width={54}
             />
             <Tooltip content={<TooltipContent />} />
             <Legend
               formatter={(value) => {
                 const r = results.find((r) => r.portfolioId === value);
-                return <span style={{ fontSize: 12, color: "hsl(var(--foreground))" }}>{r?.label ?? value}</span>;
+                return <span style={{ fontSize: 11, color: "hsl(var(--foreground))" }}>{r?.label ?? value}</span>;
               }}
+              wrapperStyle={{ paddingTop: 8 }}
             />
-            {mode === "drawdown" && <ReferenceLine y={0} stroke="hsl(var(--border))" strokeDasharray="4 2" />}
+            {isDrawdown && <ReferenceLine y={0} stroke="hsl(var(--border))" strokeDasharray="4 2" />}
             {results.map((r) => (
-              <Line
+              <Area
                 key={r.portfolioId}
                 type="monotone"
                 dataKey={r.portfolioId}
                 stroke={r.color}
                 strokeWidth={2}
+                fill={`url(#grad-${r.portfolioId})`}
                 dot={false}
-                activeDot={{ r: 4 }}
+                activeDot={{ r: 4, strokeWidth: 0 }}
               />
             ))}
-          </LineChart>
+          </AreaChart>
         </ResponsiveContainer>
       </div>
     </div>

@@ -232,6 +232,28 @@
     pointer-events: none;
   }
 
+  /* Custom thin scrollbar */
+  .scrollbar-none { scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+
+  /* Safe area bottom for mobile sticky */
+  .safe-bottom { padding-bottom: max(0.75rem, env(safe-area-inset-bottom)); }
+
+  /* Smooth transitions for theme toggle */
+  *, *::before, *::after { transition-property: background-color, border-color, color; transition-duration: 150ms; transition-timing-function: ease; }
+  /* But NOT for transforms, shadows, opacity — keep those instant */
+  button, a, input, select, textarea { transition-property: background-color, border-color, color, box-shadow, opacity, transform; transition-duration: 120ms; }
+
+  /* Number input: hide arrows */
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type="number"] { -moz-appearance: textfield; }
+
   .no-default-hover-elevate {}
   .no-default-active-elevate {}
 
