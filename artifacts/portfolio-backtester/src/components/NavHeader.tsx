@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { BarChart3, Sun, Moon, TrendingUp } from "lucide-react";
+import { BarChart3, Sun, Moon, TrendingUp, Home } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -11,8 +11,9 @@ export function NavHeader({ isDark, onToggleDark }: Props) {
   const [location, navigate] = useLocation();
 
   const NAV_ITEMS = [
-    { href: "/", label: "백테스팅", icon: null },
-    { href: "/paper-trading", label: "모의투자", icon: TrendingUp },
+    { href: "/",             label: "홈",       icon: Home },
+    { href: "/backtester",   label: "백테스팅", icon: null },
+    { href: "/paper-trading",label: "모의투자", icon: TrendingUp },
   ];
 
   return (
@@ -20,7 +21,7 @@ export function NavHeader({ isDark, onToggleDark }: Props) {
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-13 sm:h-14 flex items-center gap-2 sm:gap-4">
         <button
           onClick={() => navigate("/")}
-          className="flex items-center gap-2 sm:gap-3 shrink-0 hover:opacity-80 transition-opacity"
+          className="flex items-center gap-2 sm:gap-2.5 shrink-0 hover:opacity-80 transition-opacity"
         >
           <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-primary flex items-center justify-center">
             <BarChart3 className="w-4 h-4 text-primary-foreground" />
@@ -35,13 +36,14 @@ export function NavHeader({ isDark, onToggleDark }: Props) {
         <nav className="flex items-center gap-0.5 sm:gap-1 ml-1 sm:ml-2">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
+            const isActive = location === item.href;
             return (
               <button
                 key={item.href}
                 onClick={() => navigate(item.href)}
                 className={cn(
                   "flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-medium transition-all",
-                  location === item.href
+                  isActive
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 )}
