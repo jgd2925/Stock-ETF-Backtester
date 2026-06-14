@@ -68,14 +68,32 @@ interface AssetData {
   dividends: DividendData[];
 }
 
+// Convert a timestamp to "YYYY-MM" so KR (KST) and US (EST) monthly bars
+// that represent the same calendar month are treated as equal, regardless of
+// the exact millisecond offset produced by each market's timezone.
+function toMonthKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 function alignDates(assetsData: AssetData[]): number[] {
   if (assetsData.length === 0) return [];
-  const sets = assetsData.map((a) => new Set(a.prices.map((p) => p.date)));
-  let common = [...sets[0]];
-  for (let i = 1; i < sets.length; i++) {
-    common = common.filter((d) => sets[i].has(d));
+  // Build per-asset sets of "YYYY-MM" keys
+  const monthSets = assetsData.map(
+    (a) => new Set(a.prices.map((p) => toMonthKey(p.date)))
+  );
+  // Intersection across all assets
+  let common = [...monthSets[0]];
+  for (let i = 1; i < monthSets.length; i++) {
+    common = common.filter((k) => monthSets[i].has(k));
   }
-  return common.sort((a, b) => a - b);
+  // Return sorted UTC month-start timestamps
+  return common
+    .sort()
+    .map((k) => {
+      const [y, m] = k.split("-").map(Number);
+      return Date.UTC(y, m - 1, 1);
+    });
 }
 
 function findClosestPrice(prices: HistoricalData[], date: number): number {
