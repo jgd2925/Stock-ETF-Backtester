@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, Trash2, AlertCircle, Equal } from "lucide-react";
+import { Plus, Trash2, AlertCircle, Equal, Pencil, Check, X } from "lucide-react";
 import { SymbolSearch } from "./SymbolSearch";
 import type { SearchResult } from "@/lib/api";
 import type { Holding } from "@/lib/backtest";
@@ -17,36 +17,56 @@ interface Props {
   onChange: (portfolios: Portfolio[]) => void;
 }
 
+interface QuickTicker {
+  symbol: string;
+  name: string;
+}
+
 const COLORS = [
   "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7",
   "#06B6D4", "#F97316", "#10B981", "#8B5CF6", "#EC4899",
 ];
 
-const POPULAR_US = [
-  { symbol: "SPY",  name: "S&P 500" },
-  { symbol: "QQQ",  name: "나스닥 100" },
-  { symbol: "SCHD", name: "슈드 배당" },
-  { symbol: "TQQQ", name: "나스닥 3배" },
-  { symbol: "GLD",  name: "금 ETF" },
-  { symbol: "TLT",  name: "장기 국채" },
-];
-const POPULAR_KR = [
+const DEFAULT_TICKERS: QuickTicker[] = [
+  { symbol: "SPY",       name: "S&P 500" },
+  { symbol: "QQQ",       name: "나스닥 100" },
+  { symbol: "SCHD",      name: "배당 ETF" },
+  { symbol: "TQQQ",      name: "나스닥 3배" },
+  { symbol: "GLD",       name: "금 ETF" },
+  { symbol: "TLT",       name: "장기 국채" },
   { symbol: "005930.KS", name: "삼성전자" },
   { symbol: "069500.KS", name: "KODEX 200" },
   { symbol: "379800.KS", name: "KODEX S&P500" },
 ];
 
+const TICKER_STORAGE_KEY = "jgdlab-quicktickers";
+
+function loadTickers(): QuickTicker[] {
+  try {
+    const raw = localStorage.getItem(TICKER_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return DEFAULT_TICKERS;
+}
+
+function persistTickers(tickers: QuickTicker[]) {
+  try { localStorage.setItem(TICKER_STORAGE_KEY, JSON.stringify(tickers)); } catch {}
+}
+
 export function PortfolioBuilder({ portfolios, onChange }: Props) {
   const [activeTab, setActiveTab] = useState(portfolios[0]?.id ?? "");
-  const [krOpen, setKrOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [tickers, setTickers] = useState<QuickTicker[]>(() => loadTickers());
+
+  // ── Portfolio CRUD ──────────────────────────────────────────────
 
   function addPortfolio() {
     const id = `p${Date.now()}`;
-    const newPortfolios = [
+    const next = [
       ...portfolios,
       { id, label: `포트폴리오 ${portfolios.length + 1}`, color: COLORS[portfolios.length % COLORS.length], holdings: [] },
     ];
-    onChange(newPortfolios);
+    onChange(next);
     setActiveTab(id);
   }
 
@@ -60,12 +80,13 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
     onChange(portfolios.map((p) => (p.id === id ? { ...p, label } : p)));
   }
 
+  // ── Holdings CRUD ───────────────────────────────────────────────
+
   function addHolding(portfolioId: string, result: SearchResult) {
     onChange(portfolios.map((p) => {
       if (p.id !== portfolioId) return p;
       if (p.holdings.some((h) => h.symbol === result.symbol)) return p;
-      const holdings = [...p.holdings, { symbol: result.symbol, name: result.shortName || result.longName || result.symbol, weight: 0 }];
-      return { ...p, holdings: autoBalance(holdings) };
+      return { ...p, holdings: autoBalance([...p.holdings, { symbol: result.symbol, name: result.shortName || result.longName || result.symbol, weight: 0 }]) };
     }));
   }
 
@@ -88,8 +109,7 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
     if (!p) return;
     const h = p.holdings.find((h) => h.symbol === symbol);
     if (!h) return;
-    const newW = Math.max(0, Math.min(100, Math.round((h.weight + delta) * 10) / 10));
-    updateWeight(portfolioId, symbol, newW);
+    updateWeight(portfolioId, symbol, Math.max(0, Math.min(100, Math.round((h.weight + delta) * 10) / 10)));
   }
 
   function autoBalance(holdings: Holding[]): Holding[] {
@@ -102,6 +122,28 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
   function equalWeightAll(portfolioId: string) {
     onChange(portfolios.map((p) => p.id === portfolioId ? { ...p, holdings: autoBalance(p.holdings) } : p));
   }
+
+  // ── Quick-ticker editing ────────────────────────────────────────
+
+  function updateTicker(i: number, field: keyof QuickTicker, val: string) {
+    const next = tickers.map((t, j) => j === i ? { ...t, [field]: val } : t);
+    setTickers(next);
+    persistTickers(next);
+  }
+
+  function removeTicker(i: number) {
+    const next = tickers.filter((_, j) => j !== i);
+    setTickers(next);
+    persistTickers(next);
+  }
+
+  function addTicker() {
+    const next = [...tickers, { symbol: "", name: "" }];
+    setTickers(next);
+    persistTickers(next);
+  }
+
+  // ── Derived ─────────────────────────────────────────────────────
 
   const active = portfolios.find((p) => p.id === activeTab);
   const totalWeight = active?.holdings.reduce((s, h) => s + h.weight, 0) ?? 0;
@@ -173,54 +215,95 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
           {/* Symbol search */}
           <SymbolSearch onSelect={(r) => addHolding(active.id, r)} placeholder="종목 검색 (예: 삼성전자, SPY, QQQ...)" />
 
-          {/* Quick add - US */}
+          {/* Quick add grid */}
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">🇺🇸 미국 인기 ETF</p>
+              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">빠른 추가</p>
               <button
-                onClick={() => setKrOpen((v) => !v)}
-                className="text-[10px] text-primary hover:underline"
+                onClick={() => setEditMode((v) => !v)}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-all",
+                  editMode
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                )}
               >
-                {krOpen ? "▲ 한국 숨기기" : "▼ 🇰🇷 한국 종목"}
+                {editMode ? <><Check className="w-3 h-3" />완료</> : <><Pencil className="w-3 h-3" />편집</>}
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-1">
-              {POPULAR_US.map((t) => {
-                const added = active.holdings.some((h) => h.symbol === t.symbol);
-                return (
-                  <button
-                    key={t.symbol}
-                    data-testid={`button-quick-add-${t.symbol}`}
-                    disabled={added}
-                    onClick={() => addHolding(active.id, { symbol: t.symbol, shortName: t.name, longName: t.name, exchange: "", quoteType: "ETF", market: "" })}
-                    className={cn(
-                      "flex flex-col items-start px-2 py-1.5 rounded-md border text-left transition-all",
-                      added ? "border-border bg-muted/50 opacity-50 cursor-not-allowed" : "border-border bg-card hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
-                    )}
-                  >
-                    <span className="font-mono text-[10px] font-bold text-primary leading-tight">{t.symbol}</span>
-                    <span className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate w-full">{t.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {krOpen && (
+
+            {editMode ? (
+              /* ── Edit mode ── */
               <div className="grid grid-cols-3 gap-1">
-                {POPULAR_KR.map((t) => {
+                {tickers.map((t, i) => (
+                  <div
+                    key={i}
+                    className="relative flex flex-col gap-0.5 p-1.5 rounded-md border border-primary/30 bg-primary/5"
+                  >
+                    <input
+                      type="text"
+                      value={t.symbol}
+                      onChange={(e) => updateTicker(i, "symbol", e.target.value.toUpperCase())}
+                      placeholder="심볼"
+                      className="w-full bg-transparent border-b border-border text-[10px] font-bold font-mono text-primary outline-none placeholder:text-muted-foreground/50 pb-0.5"
+                    />
+                    <input
+                      type="text"
+                      value={t.name}
+                      onChange={(e) => updateTicker(i, "name", e.target.value)}
+                      placeholder="이름"
+                      className="w-full bg-transparent text-[9px] text-muted-foreground outline-none placeholder:text-muted-foreground/40 truncate"
+                    />
+                    <button
+                      onClick={() => removeTicker(i)}
+                      className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                {/* Add new tile */}
+                <button
+                  onClick={addTicker}
+                  className="flex flex-col items-center justify-center gap-0.5 px-2 py-3 rounded-md border border-dashed border-border text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-all"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="text-[9px]">추가</span>
+                </button>
+              </div>
+            ) : (
+              /* ── Normal mode ── */
+              <div className="grid grid-cols-3 gap-1">
+                {tickers.filter((t) => t.symbol).map((t) => {
                   const added = active.holdings.some((h) => h.symbol === t.symbol);
                   return (
                     <button
                       key={t.symbol}
                       data-testid={`button-quick-add-${t.symbol}`}
                       disabled={added}
-                      onClick={() => addHolding(active.id, { symbol: t.symbol, shortName: t.name, longName: t.name, exchange: "KSC", quoteType: "EQUITY", market: "" })}
+                      onClick={() =>
+                        addHolding(active.id, {
+                          symbol: t.symbol,
+                          shortName: t.name || t.symbol,
+                          longName: t.name || t.symbol,
+                          exchange: "",
+                          quoteType: "ETF",
+                          market: "",
+                        })
+                      }
                       className={cn(
                         "flex flex-col items-start px-2 py-1.5 rounded-md border text-left transition-all",
-                        added ? "border-border bg-muted/50 opacity-50 cursor-not-allowed" : "border-border bg-card hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
+                        added
+                          ? "border-border bg-muted/50 opacity-50 cursor-not-allowed"
+                          : "border-border bg-card hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
                       )}
                     >
-                      <span className="font-mono text-[10px] font-bold text-primary leading-tight">{t.symbol.replace(".KS", "").replace(".KQ", "")}</span>
-                      <span className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate w-full">{t.name}</span>
+                      <span className="font-mono text-[10px] font-bold text-primary leading-tight truncate w-full">
+                        {t.symbol.replace(".KS", "").replace(".KQ", "")}
+                      </span>
+                      <span className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate w-full">
+                        {t.name || t.symbol}
+                      </span>
                     </button>
                   );
                 })}
@@ -312,7 +395,7 @@ export function PortfolioBuilder({ portfolios, onChange }: Props) {
                 <Plus className="w-5 h-5 text-muted-foreground" />
               </div>
               <p className="text-sm font-medium text-foreground">종목을 추가하세요</p>
-              <p className="text-xs text-muted-foreground mt-1">위 검색창 또는 인기 종목 버튼 사용</p>
+              <p className="text-xs text-muted-foreground mt-1">위 검색창 또는 빠른 추가 버튼 사용</p>
             </div>
           )}
         </div>
