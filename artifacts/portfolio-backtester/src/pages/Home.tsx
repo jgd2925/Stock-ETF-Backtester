@@ -96,6 +96,7 @@ export default function Home() {
   const [results, setResults] = useState<BacktestResult[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [fxConverted, setFxConverted] = useState(false);
+  const [fxWarning, setFxWarning] = useState<string | null>(null);
   const [activeResultTab, setActiveResultTab] = useState<"chart" | "metrics" | "annual" | "symbols">("chart");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appliedPortfolioId, setAppliedPortfolioId] = useState<string | null>(null);
@@ -119,6 +120,7 @@ export default function Home() {
 
   const runBacktests = useCallback(async () => {
     setError(null);
+    setFxWarning(null);
     const validPortfolios = portfolios.filter(
       (p) => p.holdings.length > 0 && Math.abs(p.holdings.reduce((s, h) => s + h.weight, 0) - 100) <= 1
     );
@@ -130,47 +132,81 @@ export default function Home() {
     try {
       const allSymbols = new Set<string>();
       validPortfolios.forEach((p) => p.holdings.forEach((h) => allSymbols.add(h.symbol)));
+
+      // Fetch USDKRW=X in parallel with stock data (retry up to 3 times with backoff)
+      async function fetchWithRetry(symbol: string, retries = 3): Promise<{ prices: any[]; dividends: any[]; currency: string }> {
+        for (let attempt = 0; attempt < retries; attempt++) {
+          try {
+            return await fetchHistoricalData(symbol, options.startDate, options.endDate);
+          } catch (e) {
+            if (attempt < retries - 1) {
+              await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+            } else {
+              throw e;
+            }
+          }
+        }
+        throw new Error("unreachable");
+      }
+
       const dataMap: Record<string, { prices: any[]; dividends: any[]; currency: string }> = {};
-      const fetchResults = await Promise.allSettled(
-        [...allSymbols].map(async (symbol) => {
-          const data = await fetchHistoricalData(symbol, options.startDate, options.endDate);
-          dataMap[symbol] = data;
-        })
-      );
+      const symbolList = [...allSymbols];
+
+      // Always prefetch USDKRW=X alongside stock data so it's ready before conversion
+      const [fetchResults, fxResult] = await Promise.all([
+        Promise.allSettled(
+          symbolList.map(async (symbol) => {
+            const data = await fetchWithRetry(symbol);
+            dataMap[symbol] = data;
+          })
+        ),
+        fetchWithRetry("USDKRW=X").catch(() => null),
+      ]);
+
       const errors: string[] = [];
       fetchResults.forEach((r, i) => {
-        if (r.status === "rejected") errors.push(`${[...allSymbols][i]}: ${(r.reason as Error)?.message ?? "데이터 로드 실패"}`);
+        if (r.status === "rejected") errors.push(`${symbolList[i]}: ${(r.reason as Error)?.message ?? "데이터 로드 실패"}`);
       });
       if (errors.length > 0) setError(`일부 종목 데이터를 불러오지 못했습니다:\n${errors.join("\n")}`);
 
       const loadedSymbols = Object.keys(dataMap);
       const hasKRW = loadedSymbols.some((s) => dataMap[s].currency === "KRW");
       const hasUSD = loadedSymbols.some((s) => dataMap[s].currency === "USD");
+
       if (hasKRW && hasUSD) {
-        try {
-          const fxData = await fetchHistoricalData("USDKRW=X", options.startDate, options.endDate);
-          const fxPrices = fxData.prices;
-          function getFxRate(date: number): number {
-            if (fxPrices.length === 0) return 1300;
-            let closest = fxPrices[0];
-            for (const p of fxPrices) { if (Math.abs(p.date - date) < Math.abs(closest.date - date)) closest = p; }
-            return closest.adjClose > 0 ? closest.adjClose : 1300;
-          }
-          for (const symbol of loadedSymbols) {
-            if (dataMap[symbol].currency === "USD") {
-              dataMap[symbol].prices = dataMap[symbol].prices.map((p: any) => {
-                const rate = getFxRate(p.date);
-                return { ...p, open: p.open * rate, high: p.high * rate, low: p.low * rate, close: p.close * rate, adjClose: p.adjClose * rate };
-              });
-              dataMap[symbol].dividends = dataMap[symbol].dividends.map((d: any) => ({ ...d, amount: d.amount * getFxRate(d.date) }));
-              dataMap[symbol].currency = "KRW";
-            }
-          }
-          setFxConverted(true);
-        } catch {
-          setError("환율(USDKRW) 데이터를 불러오지 못했습니다. 결과가 부정확할 수 있습니다.");
+        // Build FX lookup — fall back to fixed 1,350 KRW/USD if data unavailable
+        const fxPrices: { date: number; adjClose: number }[] =
+          fxResult?.prices?.filter((p: any) => p.adjClose > 0) ?? [];
+
+        const FALLBACK_RATE = 1350;
+        if (fxPrices.length === 0) {
+          setFxWarning(`USD/KRW 환율 데이터를 가져오지 못해 고정 환율 ${FALLBACK_RATE.toLocaleString()}원을 사용합니다.`);
         }
+
+        function getFxRate(date: number): number {
+          if (fxPrices.length === 0) return FALLBACK_RATE;
+          let closest = fxPrices[0];
+          for (const p of fxPrices) {
+            if (Math.abs(p.date - date) < Math.abs(closest.date - date)) closest = p;
+          }
+          return closest.adjClose > 0 ? closest.adjClose : FALLBACK_RATE;
+        }
+
+        for (const symbol of loadedSymbols) {
+          if (dataMap[symbol].currency === "USD") {
+            dataMap[symbol].prices = dataMap[symbol].prices.map((p: any) => {
+              const rate = getFxRate(p.date);
+              return { ...p, open: p.open * rate, high: p.high * rate, low: p.low * rate, close: p.close * rate, adjClose: p.adjClose * rate };
+            });
+            dataMap[symbol].dividends = dataMap[symbol].dividends.map((d: any) => ({
+              ...d, amount: d.amount * getFxRate(d.date),
+            }));
+            dataMap[symbol].currency = "KRW";
+          }
+        }
+        if (fxPrices.length > 0) setFxConverted(true);
       }
+
       const backtestResults: BacktestResult[] = validPortfolios.map((p) => {
         const assetsData = p.holdings.filter((h) => dataMap[h.symbol]).map((h) => ({
           symbol: h.symbol, prices: dataMap[h.symbol].prices, dividends: dataMap[h.symbol].dividends,
@@ -318,6 +354,12 @@ export default function Home() {
               <div className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/20 rounded-xl px-4 py-2.5 text-xs text-blue-700 dark:text-blue-300">
                 <RefreshCw className="w-3.5 h-3.5 shrink-0" />
                 USD 자산 가격이 기간별 실제 USD/KRW 환율로 원화 환산되었습니다.
+              </div>
+            )}
+            {fxWarning && (
+              <div className="flex items-center gap-2 bg-amber-500/8 border border-amber-500/20 rounded-xl px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                {fxWarning}
               </div>
             )}
 
