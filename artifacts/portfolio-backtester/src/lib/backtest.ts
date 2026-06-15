@@ -270,19 +270,32 @@ export function runBacktest(
     let dividendsThisPeriod = 0;
 
     holdings.forEach((h) => {
+      // divs = total dividend paid per share during this period (Yahoo Finance)
       const divs = getDividendsInPeriod(divMap[h.symbol] ?? [], prevDate, date);
       if (divs > 0) {
-        const divAmount = divs * (shares[h.symbol] ?? 0);
+        const currentShares = shares[h.symbol] ?? 0;
+        const divAmount = divs * currentShares;
         dividendsThisPeriod += divAmount;
         totalDividends += divAmount;
         symbolDividends[h.symbol] = (symbolDividends[h.symbol] ?? 0) + divAmount;
 
-        if (options.reinvestDividends) {
+        // ── adjClose already bakes in dividend reinvestment ──────────
+        // adjClose_t1 / adjClose_t0 = total return (price + dividend yield).
+        // So using adjClose to track shares*price is sufficient for the
+        // reinvest=true case — no extra shares should be added.
+        //
+        // For reinvest=false: adjClose still embeds the dividend into the
+        // price ratio. We undo this by reducing shares proportionally so
+        // the dividend value is effectively "paid out" of the portfolio.
+        if (!options.reinvestDividends) {
           const price = findClosestPrice(priceMap[h.symbol] ?? [], date);
-          if (price > 0) {
-            shares[h.symbol] = (shares[h.symbol] ?? 0) + divAmount / price;
+          if (price > divs) {
+            // Reduce shares so the total position value decreases by divAmount,
+            // cancelling the dividend gain already present in adjClose.
+            shares[h.symbol] = currentShares * (price - divs) / price;
           }
         }
+        // reinvestDividends=true: do nothing extra — adjClose handles it.
       }
     });
 
